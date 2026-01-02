@@ -5,20 +5,18 @@ from collections import Counter
 import datetime
 from datetime import timedelta
 
-# --- CẤU HÌNH GIAO DIỆN ---
-st.set_page_config(page_title="App Xổ Số Lịch Vạn Niên", page_icon="📅", layout="centered")
-st.title("📅 Dự Đoán Theo Lịch (V10)")
-st.write("---")
+# --- CẤU HÌNH ---
+st.set_page_config(page_title="App Xổ Số Đa Năng", page_icon="🛠️", layout="centered")
+st.title("🛠️ Dự Đoán & Backtest (V11 - Fix Lỗi Ngày)")
 
-# --- 1. KHU VỰC TẢI FILE ---
-st.info("Bước 1: Tải các file Excel")
-uploaded_files = st.file_uploader("Chọn file (Ví dụ: THÁNG 12.2025, THÁNG 1.2026)", type=['xlsx'], accept_multiple_files=True)
+# --- 1. TẢI FILE ---
+st.info("Bước 1: Tải các file Excel (T12.2025, T1.2026...)")
+uploaded_files = st.file_uploader("Chọn file:", type=['xlsx'], accept_multiple_files=True)
 
 # --- CẤU HÌNH PHỤ ---
 with st.sidebar:
     st.header("⚙️ Cài đặt")
     ROLLING_WINDOW = st.number_input("Chu kỳ xét (Ngày)", min_value=1, value=10)
-    st.caption("Ví dụ: Chọn 10 ngày thì khi dự đoán ngày 2/1, máy sẽ xem lại từ 23/12 đến 1/1.")
 
 # --- CÁC HÀM XỬ LÝ ---
 SCORE_MAPPING = {
@@ -54,26 +52,30 @@ def get_header_row_index(df_raw):
         if "THANHVIEN" in row_str and "STT" in row_str: return i
     return 3
 
-# --- [FIX] HÀM ĐỌC TÊN FILE THÔNG MINH HƠN ---
-def parse_month_year_from_filename(filename):
-    # 1. Tìm Năm: Tìm số có 4 chữ số (2025, 2026...)
+# --- HÀM ĐỌC NGÀY THÔNG MINH HƠN ---
+def parse_date_from_sheet(sheet_name, filename):
+    # 1. Thử lấy Tháng/Năm từ tên File trước
     year_match = re.search(r'(20\d{2})', filename)
     year = int(year_match.group(1)) if year_match else None
     
-    # 2. Tìm Tháng: Tìm số nằm sau chữ "THÁNG", "THANG", "T", hoặc "M"
-    # Regex này chấp nhận: "THÁNG 1", "THANG.1", "T12", "T 05" v.v.
-    # re.IGNORECASE giúp không phân biệt hoa thường
     month_match = re.search(r'(?:THANG|THÁNG|TH|T|M)[^0-9]*(\d+)', filename, re.IGNORECASE)
-    
-    if month_match:
-        month = int(month_match.group(1))
-    else:
-        # Nếu không thấy chữ "THÁNG", thử tìm dạng "1.2026" hoặc "12-2025"
-        # Tìm số đứng ngay trước Năm
-        alt_match = re.search(r'(\d+)[\.\-_/]+' + str(year), filename)
+    if not month_match:
+        # Tìm kiểu 1.2026 hoặc 12-2025
+        alt_match = re.search(r'(\d+)[\.\-_/]+' + str(year), filename) if year else None
         month = int(alt_match.group(1)) if alt_match else None
+    else:
+        month = int(month_match.group(1))
 
-    return month, year
+    # 2. Lấy Ngày từ tên Sheet (Chấp nhận: "1", "01", "Ngày 1", "Day 1")
+    day_match = re.search(r'(\d+)', sheet_name)
+    day = int(day_match.group(1)) if day_match else None
+    
+    # 3. Kết hợp
+    if day and month and year:
+        try:
+            return datetime.date(year, month, day)
+        except ValueError: return None
+    return None
 
 @st.cache_data(ttl=600)
 def load_data_with_calendar(files):
@@ -82,28 +84,16 @@ def load_data_with_calendar(files):
     debug_logs = []
     
     for file in files:
-        # Sử dụng hàm đọc tên file mới đã sửa lỗi
-        month_file, year_file = parse_month_year_from_filename(file.name)
-        
-        # Nếu vẫn không đọc được, thử đoán: 
-        # Nếu chỉ có 1 file và không đọc được, có thể gán tạm thời gian hiện tại (nhưng rủi ro).
-        # Ở đây ta sẽ báo lỗi cụ thể để user biết.
-        if not month_file or not year_file:
-            debug_logs.append(f"❌ LỖI: Không đọc được ngày tháng file '{file.name}'")
-            continue
-            
-        debug_logs.append(f"✅ Đã nhận diện file '{file.name}' là: Tháng {month_file} / Năm {year_file}")
-        
+        debug_logs.append(f"📂 Đang đọc file: {file.name}")
         try:
             xls = pd.ExcelFile(file)
             for sheet_name in xls.sheet_names:
                 try:
-                    match = re.search(r'(\d+)', sheet_name)
-                    if not match: continue
-                    day = int(match.group(1))
+                    # Sử dụng hàm đọc ngày mới
+                    current_date = parse_date_from_sheet(sheet_name, file.name)
                     
-                    try: current_date = datetime.date(year_file, month_file, day)
-                    except ValueError: continue 
+                    if not current_date:
+                        continue 
 
                     temp = pd.read_excel(xls, sheet_name=sheet_name, header=None, nrows=10)
                     h = get_header_row_index(temp)
@@ -112,17 +102,20 @@ def load_data_with_calendar(files):
                     
                     data_cache[current_date] = df
                     
+                    # Tìm KQ
                     mask_kq = df.iloc[:, 0].astype(str).apply(clean_text).str.contains("KQ", na=False)
                     if mask_kq.any():
                         kq_row = df[mask_kq].iloc[0]
+                        # Patterns tìm cột ngày KQ
+                        day, month = current_date.day, current_date.month
                         target_col_patterns = [
-                            f"{day}/{month_file}", f"{day:02d}/{month_file}", 
-                            f"{day}/{month_file:02d}", str(day)
+                            f"{day}/{month}", f"{day:02d}/{month}", 
+                            f"{day}/{month:02d}", f"{day:02d}/{month:02d}", str(day)
                         ]
                         found_kq = None
                         for c in df.columns:
                             for p in target_col_patterns:
-                                if p in c: 
+                                if p in c: # So sánh chuỗi chứa
                                     try: 
                                         val = str(kq_row[c])
                                         nums = get_nums(val)
@@ -131,8 +124,10 @@ def load_data_with_calendar(files):
                             if found_kq: break
                         if found_kq: kq_db[current_date] = found_kq
                 except: continue
-        except: continue
-        
+        except: 
+            debug_logs.append(f"❌ Lỗi đọc file Excel này.")
+            continue
+            
     return data_cache, kq_db, debug_logs
 
 def get_group_top_n_stable(df, group_name, grp_col, limit=80):
@@ -180,13 +175,11 @@ def calculate_by_date(target_date, rolling_window, data_cache, kq_db):
         
         df = data_cache[d_obj]
         prev_date = d_obj - timedelta(days=1)
-        prev_day = prev_date.day
-        prev_month = prev_date.month
         
         patterns = [
-            f"{prev_day}/{prev_month}", f"{prev_day:02d}/{prev_month}",
-            f"{prev_day}/{prev_month:02d}", f"{prev_day:02d}/{prev_month:02d}",
-            str(prev_day)
+            f"{prev_date.day}/{prev_date.month}", 
+            f"{prev_date.day:02d}/{prev_date.month}",
+            str(prev_date.day)
         ]
         
         grp_col = None
@@ -216,10 +209,8 @@ def calculate_by_date(target_date, rolling_window, data_cache, kq_db):
     if target_date in data_cache:
         df_target = data_cache[target_date]
         prev_date_target = target_date - timedelta(days=1)
-        p_day = prev_date_target.day
-        p_month = prev_date_target.month
+        patterns = [f"{prev_date_target.day}/{prev_date_target.month}", str(prev_date_target.day)]
         
-        patterns = [f"{p_day}/{p_month}", f"{p_day:02d}/{p_month}", str(p_day)]
         grp_col_target = None
         for c in sorted(df_target.columns):
             for p in patterns:
@@ -246,67 +237,57 @@ def calculate_by_date(target_date, rolling_window, data_cache, kq_db):
 
 # --- MAIN SCREEN ---
 if uploaded_files:
-    with st.spinner("⏳ Đang phân tích file..."):
+    with st.spinner("⏳ Đang phân tích..."):
         data_cache, kq_db, debug_logs = load_data_with_calendar(uploaded_files)
     
-    # Hiển thị log trạng thái file ngay đầu trang để kiểm tra
-    with st.expander("📝 Bấm vào đây để xem máy có đọc đúng tên file không?", expanded=True):
-        if not debug_logs:
-            st.write("Chưa đọc được file nào.")
+    # Hiển thị kết quả đọc file
+    with st.expander("ℹ️ Trạng thái đọc file (Bấm để xem chi tiết)", expanded=True):
+        st.write(f"Tổng số ngày đã nhận diện được: **{len(data_cache)}** ngày")
+        if len(data_cache) == 0:
+            st.error("⚠️ Chưa đọc được ngày nào! Hãy kiểm tra tên File và tên Sheet.")
         else:
-            for log in debug_logs:
-                if "❌" in log: st.error(log)
-                else: st.success(log)
+            # Liệt kê vài ngày đọc được để user kiểm tra
+            sample_dates = [d.strftime('%d/%m/%Y') for d in sorted(list(data_cache.keys()))[:5]]
+            st.write(f"Ví dụ các ngày đã đọc: {', '.join(sample_dates)} ...")
 
     if data_cache:
         tab1, tab2 = st.tabs(["🎯 DỰ ĐOÁN", "🛠️ BACKTEST"])
         
         with tab1:
-            st.write("### Chọn ngày trên lịch:")
+            st.write("### Chọn ngày:")
             default_date = max(data_cache.keys()) if data_cache else datetime.date.today()
-            selected_date = st.date_input("Ngày dự đoán:", value=default_date)
+            selected_date = st.date_input("Ngày:", value=default_date)
             
-            if st.button("🚀 XEM KẾT QUẢ", use_container_width=True):
+            if st.button("🚀 DỰ ĐOÁN", use_container_width=True):
                 top6, result = calculate_by_date(selected_date, ROLLING_WINDOW, data_cache, kq_db)
-                st.info(f"🏆 **TOP 6:** {', '.join(top6)}")
-                st.success(f"**KẾT QUẢ ({len(result)} số):**")
+                st.info(f"🏆 TOP 6: {', '.join(top6)}")
+                st.success(f"KẾT QUẢ: {len(result)} số")
                 st.code(",".join(result), language="text")
                 if selected_date in kq_db:
-                    real = kq_db[selected_date]
-                    if real in result: st.success(f"🎉 TRÚNG: {real}")
-                    else: st.error(f"❌ TRƯỢT: {real}")
-                else: st.warning("⚠️ Chưa có KQ.")
+                    st.write(f"Kết quả thực tế: **{kq_db[selected_date]}**")
 
         with tab2:
-            st.write("### Backtest lịch sử:")
+            st.write("### Backtest:")
             c1, c2 = st.columns(2)
-            with c1: d_start = st.date_input("Từ ngày:", value=default_date - timedelta(days=5))
-            with c2: d_end = st.date_input("Đến ngày:", value=default_date)
+            with c1: d_start = st.date_input("Từ:", value=default_date - timedelta(days=5))
+            with c2: d_end = st.date_input("Đến:", value=default_date)
             
-            if st.button("⚡ CHẠY KIỂM CHỨNG", use_container_width=True):
-                if d_start > d_end: st.error("Ngày sai!")
-                else:
-                    delta = d_end - d_start
-                    days_list = [d_start + timedelta(days=i) for i in range(delta.days + 1)]
-                    logs = []
-                    bar = st.progress(0)
-                    for i, d in enumerate(days_list):
-                        bar.progress((i+1)/len(days_list))
-                        if d not in data_cache: continue
-                        try:
-                            _, res = calculate_by_date(d, ROLLING_WINDOW, data_cache, kq_db)
-                            act = kq_db.get(d, "N/A")
-                            stt = "WIN ✅" if act in res else "LOSS ❌"
-                            if act == "N/A": stt = "Waiting"
-                            logs.append({"Ngày": d.strftime('%d/%m/%Y'), "KQ": act, "Trạng thái": stt, "Số lượng": len(res)})
-                        except: pass
-                    bar.empty()
-                    if logs:
-                        df_res = pd.DataFrame(logs)
-                        wins = df_res[df_res["Trạng thái"] == "WIN ✅"].shape[0]
-                        total = df_res[df_res["KQ"] != "N/A"].shape[0]
-                        if total > 0: st.metric("Tỷ lệ thắng", f"{wins}/{total} ({round(wins/total*100)}%)")
-                        st.dataframe(df_res, use_container_width=True)
-                    else: st.warning("Không có dữ liệu.")
-else:
-    st.info("👈 Hãy tải file Excel lên.")
+            if st.button("⚡ CHẠY", use_container_width=True):
+                delta = d_end - d_start
+                days_list = [d_start + timedelta(days=i) for i in range(delta.days + 1)]
+                logs = []
+                bar = st.progress(0)
+                for i, d in enumerate(days_list):
+                    bar.progress((i+1)/len(days_list))
+                    if d not in data_cache: continue
+                    try:
+                        _, res = calculate_by_date(d, ROLLING_WINDOW, data_cache, kq_db)
+                        act = kq_db.get(d, "N/A")
+                        stt = "WIN ✅" if act in res else "LOSS ❌"
+                        if act == "N/A": stt = "Waiting"
+                        logs.append({"Ngày": d.strftime('%d/%m'), "KQ": act, "TT": stt})
+                    except: pass
+                bar.empty()
+                if logs:
+                    st.dataframe(pd.DataFrame(logs), use_container_width=True)
+                else: st.warning("Không có dữ liệu.")
