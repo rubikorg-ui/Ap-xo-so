@@ -8,7 +8,7 @@ import io
 
 # --- CẤU HÌNH ---
 st.set_page_config(page_title="Quang Pro V24", page_icon="🎯", layout="wide")
-st.title("🎯 Quang Pro V24: Matrix Phân Tích & Tự Chọn")
+st.title("🎯 Quang Pro V24: Matrix Edition (Fix Backtest)")
 
 # --- 1. TẢI FILE ---
 uploaded_files = st.file_uploader("Tải TẤT CẢ file CSV (Tháng 12, Tháng 1...):", type=['xlsx', 'csv'], accept_multiple_files=True)
@@ -234,7 +234,7 @@ def load_data_v24(files):
 
 # --- HÀM TÍNH TOÁN CORE ---
 def calculate_v24_final(target_date, rolling_window, cache, kq_db, limits_config, min_votes, score_std, score_mod, use_inverse, manual_groups=None):
-    if target_date not in cache: return None, "Chưa có dữ liệu."
+    if target_date not in cache: return None, "Chưa có dữ liệu ngày này."
     
     curr_data = cache[target_date]
     df = curr_data['df']
@@ -257,6 +257,7 @@ def calculate_v24_final(target_date, rolling_window, cache, kq_db, limits_config
     stats_std = {g: {'wins': 0, 'ranks': []} for g in groups}
     stats_mod = {g: {'wins': 0} for g in groups}
 
+    # Auto Mode: Backtest để tìm Top 6
     if not manual_groups:
         past_dates = []
         check_d = target_date - timedelta(days=1)
@@ -344,6 +345,7 @@ def calculate_v24_final(target_date, rolling_window, cache, kq_db, limits_config
         top6_std = [x[0] for x in final_std[:6]]
         best_mod_grp = sorted(stats_mod.keys(), key=lambda g: (-stats_mod[g]['wins'], g))[0]
     
+    # Dự đoán
     hist_series = df[col_hist_used].astype(str).apply(lambda x: re.sub(r'[^0-9X]', '', x.upper().replace('S','6')))
     
     def get_group_set_final(group_name, p_map, s_map, limit, min_v, inverse):
@@ -432,13 +434,13 @@ def calculate_v24_final(target_date, rolling_window, cache, kq_db, limits_config
         "stats_groups_mod": stats_mod
     }, None
 
-# --- HÀM PHÂN TÍCH NHÓM CHUYÊN SÂU (UPDATE MATRIX VIEW) ---
+# --- HÀM PHÂN TÍCH NHÓM CHUYÊN SÂU ---
 def analyze_group_performance(start_date, end_date, cut_limit, score_map, data_cache, kq_db, min_v, inverse):
     delta = (end_date - start_date).days + 1
     dates = [start_date + timedelta(days=i) for i in range(delta)]
     
     grp_stats = {f"{i}x": {'wins': 0, 'history': []} for i in range(10)}
-    detailed_rows = [] # Cho Matrix View
+    detailed_rows = [] 
     
     for d in dates:
         day_record = {"Ngày": d.strftime("%d/%m"), "KQ": kq_db.get(d, "N/A")}
@@ -511,7 +513,7 @@ def analyze_group_performance(start_date, end_date, cut_limit, score_map, data_c
             is_win = kq in top_set
             if is_win: grp_stats[g]['wins'] += 1
             grp_stats[g]['history'].append("W" if is_win else "L")
-            day_record[g] = "✅" if is_win else "░" # Ký hiệu cho Matrix view
+            day_record[g] = "✅" if is_win else "░" 
             
         detailed_rows.append(day_record)
             
@@ -622,6 +624,10 @@ if uploaded_files:
                     start, end = date_range[0], date_range[1]
                     logs = []
                     group_tracker = {f"{i}x": {'wins_real': 0, 'picked_std': 0, 'picked_mod': 0} for i in range(10)}
+                    
+                    # LOGIC MATRIX NHÓM TRONG BACKTEST
+                    grp_matrix_logs = []
+
                     bar = st.progress(0)
                     delta = (end - start).days + 1
                     
@@ -629,23 +635,46 @@ if uploaded_files:
                         d = start + timedelta(days=i)
                         bar.progress((i+1)/delta)
                         if d not in kq_db: continue
-                        try:
-                            res, err = calculate_v24_final(d, ROLLING_WINDOW, data_cache, kq_db, limit_cfg, MIN_VOTES, custom_std, custom_mod, USE_INVERSE, None)
-                            if err: continue
+                        
+                        # --- CHỖ NÀY ĐÃ GỠ BỎ TRY/EXCEPT ĐỂ HIỆN LỖI ---
+                        res, err = calculate_v24_final(d, ROLLING_WINDOW, data_cache, kq_db, limit_cfg, MIN_VOTES, custom_std, custom_mod, USE_INVERSE, None)
+                        if err: 
+                            st.error(f"Lỗi ngày {d}: {err}")
+                            continue
+                        
+                        real = kq_db[d]
+                        t_set = res['dan_final'] if "FINAL" in bt_mode else (res['dan_goc'] if "Gốc" in bt_mode else res['dan_mod'])
+                        is_win = real in t_set
+                        logs.append({"Ngày": d.strftime("%d/%m"), "KQ": real, "TT": "WIN" if is_win else "MISS", "Số": len(t_set), "Chi tiết": ",".join(t_set)})
+                        
+                        if show_group_stats:
+                            # 1. Thống kê tổng hợp
+                            real_grp = f"{str(real).zfill(2)[0]}x" # FIX: zfill(2) để 05 -> 0x
+                            if real_grp in group_tracker: group_tracker[real_grp]['wins_real'] += 1
+                            for g in res['top6_std']:
+                                if g in group_tracker: group_tracker[g]['picked_std'] += 1
+                            if res['best_mod'] in group_tracker: group_tracker[res['best_mod']]['picked_mod'] += 1
                             
-                            real = kq_db[d]
-                            t_set = res['dan_final'] if "FINAL" in bt_mode else (res['dan_goc'] if "Gốc" in bt_mode else res['dan_mod'])
-                            is_win = real in t_set
-                            logs.append({"Ngày": d.strftime("%d/%m"), "KQ": real, "TT": "WIN" if is_win else "MISS", "Số": len(t_set), "Chi tiết": ",".join(t_set)})
+                            # 2. Thống kê Matrix từng ngày (Cho nhóm)
+                            # Cần biết hôm đó nhóm nào ăn (dựa trên KQ thực)
+                            # Logic: Nhóm nào chứa KQ thì đánh dấu ✅, còn lại ░
+                            # (Lưu ý: Đây là thống kê KQ thực tế về nhóm nào, chứ chưa phải là Backtest nhóm đó trúng hay trượt theo Top 60)
+                            # Nếu muốn biết Nhóm trúng hay trượt theo limit 60 -> Phải dùng logic Tab 3
+                            # Ở đây ta hiển thị: KQ về nhóm nào? Và nhóm nào ĐƯỢC CHỌN?
                             
-                            if show_group_stats:
-                                real_grp = f"{str(real)[0]}x"
-                                if real_grp in group_tracker: group_tracker[real_grp]['wins_real'] += 1
-                                for g in res['top6_std']:
-                                    if g in group_tracker: group_tracker[g]['picked_std'] += 1
-                                if res['best_mod'] in group_tracker: group_tracker[res['best_mod']]['picked_mod'] += 1
-                        except: pass
-                    
+                            day_m = {"Ngày": d.strftime("%d/%m"), "KQ": real}
+                            for g in [f"{k}x" for k in range(10)]:
+                                mark = "░"
+                                if g == real_grp: mark = "✅" # KQ về nhóm này
+                                
+                                # Đánh dấu nếu được chọn
+                                picked = ""
+                                if g in res['top6_std']: picked += "🔹" # Gốc chọn
+                                if g == res['best_mod']: picked += "🔸" # Mod chọn
+                                
+                                day_m[g] = f"{mark}{picked}"
+                            grp_matrix_logs.append(day_m)
+
                     bar.empty()
                     if logs:
                         st.divider()
@@ -657,6 +686,13 @@ if uploaded_files:
                         if show_group_stats:
                             st.divider()
                             st.subheader("📊 Phân tích hiệu quả Nhóm")
+                            st.caption("✅: Nhóm chứa KQ về | 🔹: Được chọn bởi Gốc (Top 6) | 🔸: Được chọn bởi Mod (Top 1)")
+                            
+                            # Bảng Matrix
+                            st.dataframe(pd.DataFrame(grp_matrix_logs), use_container_width=True, height=400)
+                            
+                            st.divider()
+                            st.caption("Tổng hợp số liệu:")
                             grp_rows = []
                             for g, info in group_tracker.items():
                                 grp_rows.append({"Nhóm": g, "Thực tế về": info['wins_real'], "Top 6 Gốc chọn": info['picked_std'], "Top 1 Mod chọn": info['picked_mod']})
