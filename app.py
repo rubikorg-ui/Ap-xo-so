@@ -6,9 +6,9 @@ import datetime
 from datetime import timedelta
 import io
 
-# --- CẤU HÌNH CÁ NHÂN HÓA ---
+# --- CẤU HÌNH ---
 st.set_page_config(page_title="Quang Pro V24", page_icon="🎯", layout="wide")
-st.title("🎯 Quang Pro V24: Hệ Thống Phân Tích Cao Cấp")
+st.title("🎯 Quang Pro V24: Matrix Phân Tích & Tự Chọn")
 
 # --- 1. TẢI FILE ---
 uploaded_files = st.file_uploader("Tải TẤT CẢ file CSV (Tháng 12, Tháng 1...):", type=['xlsx', 'csv'], accept_multiple_files=True)
@@ -51,7 +51,6 @@ with st.sidebar:
 
     st.markdown("---")
     st.header("✂️ 3. Tùy chọn cắt số (Auto)")
-    st.caption("Dùng cho chế độ chạy tự động (Top 6)")
     L_TOP_12 = st.number_input("Top 1 & 2 lấy:", min_value=10, max_value=90, value=80)
     L_TOP_34 = st.number_input("Top 3 & 4 lấy:", min_value=10, max_value=90, value=65)
     L_TOP_56 = st.number_input("Top 5 & 6 lấy:", min_value=10, max_value=90, value=60)
@@ -258,7 +257,6 @@ def calculate_v24_final(target_date, rolling_window, cache, kq_db, limits_config
     stats_std = {g: {'wins': 0, 'ranks': []} for g in groups}
     stats_mod = {g: {'wins': 0} for g in groups}
 
-    # Nếu chạy Tự Động thì mới cần Backtest để xếp hạng
     if not manual_groups:
         past_dates = []
         check_d = target_date - timedelta(days=1)
@@ -334,7 +332,6 @@ def calculate_v24_final(target_date, rolling_window, cache, kq_db, limits_config
                 top86_mod = get_top_nums_bt(mems, d_score_mod, d_score_std, limits_config['mod'], min_votes, use_inverse)
                 if kq in top86_mod: stats_mod[g]['wins'] += 1
 
-    # --- TỔNG HỢP TOP 6 (Nếu chạy Auto) ---
     top6_std = []
     best_mod_grp = ""
     
@@ -347,7 +344,6 @@ def calculate_v24_final(target_date, rolling_window, cache, kq_db, limits_config
         top6_std = [x[0] for x in final_std[:6]]
         best_mod_grp = sorted(stats_mod.keys(), key=lambda g: (-stats_mod[g]['wins'], g))[0]
     
-    # --- DỰ ĐOÁN (LẤY SỐ) ---
     hist_series = df[col_hist_used].astype(str).apply(lambda x: re.sub(r'[^0-9X]', '', x.upper().replace('S','6')))
     
     def get_group_set_final(group_name, p_map, s_map, limit, min_v, inverse):
@@ -393,12 +389,10 @@ def calculate_v24_final(target_date, rolling_window, cache, kq_db, limits_config
     final_modified = []
 
     if manual_groups:
-        # CHẾ ĐỘ THỦ CÔNG: Gộp số từ các nhóm đã chọn
         pool_std = []
         for g in manual_groups:
-            # Lấy limit mặc định của Top 1 (80) hoặc cho user chỉnh. Tạm lấy l12
             pool_std.extend(list(get_group_set_final(g, score_std, score_mod, limits_config['l12'], min_votes, use_inverse)))
-        final_original = sorted(list(set(pool_std))) # Union
+        final_original = sorted(list(set(pool_std))) 
         
         pool_mod = []
         for g in manual_groups:
@@ -406,7 +400,6 @@ def calculate_v24_final(target_date, rolling_window, cache, kq_db, limits_config
         final_modified = sorted(list(set(pool_mod)))
         
     else:
-        # CHẾ ĐỘ TỰ ĐỘNG (TOP 6)
         limits_std = {
             top6_std[0]: limits_config['l12'], top6_std[1]: limits_config['l12'], 
             top6_std[2]: limits_config['l34'], top6_std[3]: limits_config['l34'], 
@@ -439,19 +432,22 @@ def calculate_v24_final(target_date, rolling_window, cache, kq_db, limits_config
         "stats_groups_mod": stats_mod
     }, None
 
-# --- HÀM PHÂN TÍCH NHÓM CHUYÊN SÂU ---
+# --- HÀM PHÂN TÍCH NHÓM CHUYÊN SÂU (UPDATE MATRIX VIEW) ---
 def analyze_group_performance(start_date, end_date, cut_limit, score_map, data_cache, kq_db, min_v, inverse):
-    report = []
-    # Khung ngày
     delta = (end_date - start_date).days + 1
     dates = [start_date + timedelta(days=i) for i in range(delta)]
     
-    # Init stats cho từng nhóm
     grp_stats = {f"{i}x": {'wins': 0, 'history': []} for i in range(10)}
+    detailed_rows = [] # Cho Matrix View
     
     for d in dates:
+        day_record = {"Ngày": d.strftime("%d/%m"), "KQ": kq_db.get(d, "N/A")}
+        
         if d not in kq_db or d not in data_cache: 
-            for g in grp_stats: grp_stats[g]['history'].append(None) # Ngày nghỉ
+            for g in grp_stats: 
+                grp_stats[g]['history'].append(None)
+                day_record[g] = "-"
+            detailed_rows.append(day_record)
             continue
             
         curr_data = data_cache[d]
@@ -467,7 +463,10 @@ def analyze_group_performance(start_date, end_date, cut_limit, score_map, data_c
              hist_col_name = data_cache[d]['hist_map'].get(prev_date)
         
         if not hist_col_name:
-             for g in grp_stats: grp_stats[g]['history'].append(None)
+             for g in grp_stats: 
+                 grp_stats[g]['history'].append(None)
+                 day_record[g] = "-"
+             detailed_rows.append(day_record)
              continue
              
         hist_series = df[hist_col_name].astype(str).apply(lambda x: re.sub(r'[^0-9X]', '', x.upper().replace('S','6')))
@@ -502,9 +501,7 @@ def analyze_group_performance(start_date, end_date, cut_limit, score_map, data_c
             
             filtered = [n for n, s in num_stats.items() if s['v'] >= min_v]
             
-            # Sort
             if inverse:
-                 # Khi phân tích đơn, nếu bật Inverse mà không có map phụ, ta dùng chính map chính làm phụ
                  sorted_res = sorted(filtered, key=lambda n: (-num_stats[n]['p'], -num_stats[n]['p'], int(n)))
             else:
                  sorted_res = sorted(filtered, key=lambda n: (-num_stats[n]['p'], -num_stats[n]['v'], int(n)))
@@ -514,8 +511,10 @@ def analyze_group_performance(start_date, end_date, cut_limit, score_map, data_c
             is_win = kq in top_set
             if is_win: grp_stats[g]['wins'] += 1
             grp_stats[g]['history'].append("W" if is_win else "L")
+            day_record[g] = "✅" if is_win else "░" # Ký hiệu cho Matrix view
             
-    # Tổng hợp báo cáo
+        detailed_rows.append(day_record)
+            
     final_report = []
     for g, info in grp_stats.items():
         hist = info['history']
@@ -545,7 +544,7 @@ def analyze_group_performance(start_date, end_date, cut_limit, score_map, data_c
             "Gãy hiện tại": curr_lose
         })
         
-    return pd.DataFrame(final_report)
+    return pd.DataFrame(final_report), pd.DataFrame(detailed_rows)
 
 
 # --- UI ---
@@ -631,7 +630,6 @@ if uploaded_files:
                         bar.progress((i+1)/delta)
                         if d not in kq_db: continue
                         try:
-                            # Backtest luôn chạy chế độ Auto
                             res, err = calculate_v24_final(d, ROLLING_WINDOW, data_cache, kq_db, limit_cfg, MIN_VOTES, custom_std, custom_mod, USE_INVERSE, None)
                             if err: continue
                             
@@ -667,20 +665,22 @@ if uploaded_files:
 
         # TAB 3: PHÂN TÍCH NHÓM CHUYÊN SÂU
         with tab3:
-            st.subheader("🔍 Phân Tích Chu Kỳ Nhóm (Group Cycle)")
-            st.caption("Kiểm tra xem nhóm nào đang 'vào cầu', nhóm nào đang 'gãy thông'.")
+            st.subheader("🔍 Phân Tích Chu Kỳ Nhóm (Matrix View)")
+            st.caption("Xem chi tiết lịch sử ăn/thua của từng nhóm theo ngày.")
             
             c_a1, c_a2, c_a3 = st.columns(3)
             with c_a1: d_range_a = st.date_input("Khoảng thời gian:", [last_d - timedelta(days=15), last_d], key="dr_a")
             with c_a2: cut_val = st.number_input("Cắt Top bao nhiêu số (Limit):", min_value=10, max_value=90, value=60, step=5)
             with c_a3: score_mode = st.radio("Dùng hệ điểm nào?", ["Gốc (Std)", "Modified"], horizontal=True)
             
-            if st.button("🔎 QUÉT DỮ LIỆU"):
+            if st.button("🔎 QUÉT DỮ LIỆU (MATRIX)"):
                 if len(d_range_a) < 2: st.warning("Chọn đủ ngày.")
                 else:
                     with st.spinner("Đang tua lại quá khứ để phân tích..."):
                         s_map = custom_std if score_mode == "Gốc (Std)" else custom_mod
-                        df_report = analyze_group_performance(d_range_a[0], d_range_a[1], cut_val, s_map, data_cache, kq_db, MIN_VOTES, USE_INVERSE)
+                        df_report, df_detail = analyze_group_performance(d_range_a[0], d_range_a[1], cut_val, s_map, data_cache, kq_db, MIN_VOTES, USE_INVERSE)
                         
-                        st.dataframe(df_report, use_container_width=True, height=400)
-                        st.caption("Gợi ý: Nhìn cột 'Gãy hiện tại'. Nếu gãy nhiều ngày liên tiếp -> Có thể sắp nổ.")
+                        st.dataframe(df_report, use_container_width=True)
+                        st.divider()
+                        st.markdown("### 📅 Chi tiết Win/Miss từng ngày")
+                        st.dataframe(df_detail, use_container_width=True, height=500)
