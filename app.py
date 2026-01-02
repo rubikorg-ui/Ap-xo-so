@@ -4,13 +4,14 @@ import re
 from collections import Counter
 import datetime
 from datetime import timedelta
+import io
 
 # --- CẤU HÌNH ---
-st.set_page_config(page_title="Xổ Số V24 (Pro)", page_icon="🎯", layout="wide") # Chuyển layout sang wide cho thoáng
-st.title("🎯 V24: Logic Gốc + Modified (Tùy Chỉnh Cắt Số)")
+st.set_page_config(page_title="Xổ Số V24 (Full Option)", page_icon="🎯", layout="wide")
+st.title("🎯 V24: Backtest Đa Năng (Xuyên Năm)")
 
 # --- 1. TẢI FILE ---
-uploaded_files = st.file_uploader("Tải file Excel (T12, T1...):", type=['xlsx'], accept_multiple_files=True)
+uploaded_files = st.file_uploader("Tải tất cả file CSV (Chọn cả T12 và T1 cùng lúc):", type=['xlsx', 'csv'], accept_multiple_files=True)
 
 # --- CẤU HÌNH BÊN (SIDEBAR) ---
 with st.sidebar:
@@ -19,28 +20,19 @@ with st.sidebar:
     
     st.markdown("---")
     st.header("✂️ Tùy chọn cắt số")
-    
-    st.subheader("1. Dàn Gốc (Original)")
-    st.caption("Số lượng số lấy cho các nhóm Top:")
-    L_TOP_12 = st.number_input("Top 1 & 2 lấy:", min_value=10, max_value=90, value=80, help="Mặc định cũ: 80")
-    L_TOP_34 = st.number_input("Top 3 & 4 lấy:", min_value=10, max_value=90, value=65, help="Mặc định cũ: 65")
-    L_TOP_56 = st.number_input("Top 5 & 6 lấy:", min_value=10, max_value=90, value=60, help="Mặc định cũ: 60")
-    
-    st.markdown("---")
-    st.subheader("2. Dàn Modified")
-    LIMIT_MODIFIED = st.number_input("Top 1 Modified lấy:", min_value=50, value=86, help="Mặc định: 86")
+    L_TOP_12 = st.number_input("Top 1 & 2 lấy:", min_value=10, max_value=90, value=80)
+    L_TOP_34 = st.number_input("Top 3 & 4 lấy:", min_value=10, max_value=90, value=65)
+    L_TOP_56 = st.number_input("Top 5 & 6 lấy:", min_value=10, max_value=90, value=60)
+    LIMIT_MODIFIED = st.number_input("Top 1 Modified lấy:", min_value=50, value=86)
 
 # ==============================================================================
-# ⚠️ CẤU HÌNH ĐIỂM SỐ - TÁCH BIỆT RÕ RÀNG
+# CẤU HÌNH ĐIỂM SỐ
 # ==============================================================================
-
-# 1. BẢNG ĐIỂM CŨ (Dùng cho Dàn Gốc - Logic V3 cũ)
 SCORE_MAPPING_STD = {
     'M10': 50, 'M9': 25, 'M8': 15, 'M7': 7, 'M6': 6, 'M5': 5,
     'M4': 4, 'M3': 3, 'M2': 2, 'M1': 1, 'M0': 0
 }
 
-# 2. BẢNG ĐIỂM MỚI (Dùng riêng cho Dàn Modified - Ưu tiên M6)
 SCORE_MAPPING_MOD = {
     'M6': 50, 'M10': 40, 'M7': 35,
     'M4': 30, 'M5': 30, 'M8': 25, 'M9': 25,
@@ -48,15 +40,14 @@ SCORE_MAPPING_MOD = {
 }
 
 # ==============================================================================
+# HÀM XỬ LÝ DỮ LIỆU (Đã update regex cho file 1.1.2026)
+# ==============================================================================
 
-# --- HÀM XỬ LÝ TEXT & NGÀY ---
 def get_nums(s):
     if pd.isna(s): return []
-    # Lọc từ khóa rác
     BAD_KEYWORDS = ['N', 'NGHI', 'SX', 'XIT', 'MISS', 'TRUOT', 'NGHỈ', 'LỖI']
     s_upper = str(s).upper()
     if any(kw in s_upper for kw in BAD_KEYWORDS): return []
-    
     raw_nums = re.findall(r'\d+', s_upper)
     return [n.zfill(2) for n in raw_nums if len(n) <= 2]
 
@@ -72,115 +63,185 @@ def get_col_score(col_name, mapping):
 
 def parse_date_smart(col_str, f_m, f_y):
     s = str(col_str).strip().upper()
+    s = re.sub(r'NGAY|NGÀY', '', s).strip()
     match_iso = re.search(r'(20\d{2})[\.\-/](\d{1,2})[\.\-/](\d{1,2})', s)
     if match_iso:
         y, p1, p2 = int(match_iso.group(1)), int(match_iso.group(2)), int(match_iso.group(3))
         if p1 != f_m and p2 == f_m: return datetime.date(y, p2, p1)
         return datetime.date(y, p1, p2)
-    match_slash = re.search(r'(\d{1,2})/(\d{1,2})', s)
+    match_slash = re.search(r'(\d{1,2})[\.\-/](\d{1,2})', s)
     if match_slash:
         d, m = int(match_slash.group(1)), int(match_slash.group(2))
+        if m < 1 or m > 12 or d < 1 or d > 31: return None
         curr_y = f_y
         if m == 12 and f_m == 1: curr_y -= 1
         elif m == 1 and f_m == 12: curr_y += 1
         try: return datetime.date(curr_y, m, d)
-        except: pass
+        except: return None
     return None
 
-def get_file_meta(filename):
-    y_match = re.search(r'20\d{2}', filename)
-    y = int(y_match.group(0)) if y_match else 2025
-    m_match = re.search(r'(?:THANG|THÁNG|T)[^0-9]*(\d+)', filename, re.IGNORECASE)
-    m = int(m_match.group(1)) if m_match else 1
-    return m, y
+def find_header_row(df_preview):
+    keywords = ["STT", "MEMBER", "THÀNH VIÊN", "TV TOP", "DANH SÁCH", "HỌ VÀ TÊN", "NICK"]
+    for idx, row in df_preview.iterrows():
+        row_str = str(row.values).upper()
+        if any(k in row_str for k in keywords):
+            return idx
+    return 3
 
-def get_sheet_date(sheet_name, f_m, f_y):
-    s_clean = re.sub(r'[^0-9]', ' ', sheet_name).strip()
-    try:
-        parts = [int(x) for x in s_clean.split()]
-        if not parts: return None
-        d = parts[0]
-        m, y = f_m, f_y
-        if len(parts) >= 3 and parts[2] > 2000: y = parts[2]; m = parts[1]
-        return datetime.date(y, m, d)
-    except: return None
+def extract_meta_from_filename(filename):
+    # Lấy Năm
+    y_match = re.search(r'20\d{2}', filename)
+    y_global = int(y_match.group(0)) if y_match else 2025
+    
+    # Lấy Tháng
+    m_match = re.search(r'(?:THANG|THÁNG|T)[^0-9]*(\d+)', filename, re.IGNORECASE)
+    m_global = int(m_match.group(1)) if m_match else 12
+
+    # Lấy Ngày cụ thể từ đuôi file (hỗ trợ cả 1.1.2026.csv)
+    # Regex này bắt: "- 1.12.csv", "- 2.csv", "- 1.1.2026.csv"
+    specific_match = re.search(r'-\s*(\d{1,2})(?:[\.\-](\d{1,2}))?(?:[\.\-]\d{4})?\.csv$', filename, re.IGNORECASE)
+    
+    target_date = None
+    if specific_match:
+        d = int(specific_match.group(1))
+        # Nếu có tháng đi kèm ở đuôi thì lấy, không thì lấy tháng global
+        m = int(specific_match.group(2)) if specific_match.group(2) else m_global
+        try:
+            target_date = datetime.date(y_global, m, d)
+        except: pass
+            
+    return m_global, y_global, target_date
 
 @st.cache_data(ttl=600)
 def load_data_v24(files):
     cache = {} 
     kq_db = {}
+    err_logs = []
+
     for file in files:
-        f_m, f_y = get_file_meta(file.name)
+        if file.name.upper() == 'N.CSV' or file.name.startswith('~$'): continue
+
+        f_m, f_y, date_from_name = extract_meta_from_filename(file.name)
+        
         try:
-            xls = pd.ExcelFile(file)
-            for sheet in xls.sheet_names:
+            dfs_to_process = []
+            
+            if file.name.endswith('.xlsx'):
+                xls = pd.ExcelFile(file)
+                for sheet in xls.sheet_names:
+                    s_date = None
+                    try:
+                        clean_s = re.sub(r'[^0-9]', ' ', sheet).strip()
+                        parts = [int(x) for x in clean_s.split()]
+                        if parts:
+                            d_s, m_s, y_s = parts[0], f_m, f_y
+                            if len(parts) >= 3 and parts[2] > 2000: y_s = parts[2]; m_s = parts[1]
+                            s_date = datetime.date(y_s, m_s, d_s)
+                    except: pass
+                    
+                    if s_date:
+                        preview = pd.read_excel(xls, sheet_name=sheet, header=None, nrows=20)
+                        h_row = find_header_row(preview)
+                        df = pd.read_excel(xls, sheet_name=sheet, header=h_row)
+                        dfs_to_process.append((s_date, df))
+
+            elif file.name.endswith('.csv'):
+                if not date_from_name: continue
                 try:
-                    t_date = get_sheet_date(sheet, f_m, f_y)
-                    if not t_date: continue
-                    
-                    preview = pd.read_excel(xls, sheet_name=sheet, header=None, nrows=10)
-                    h_row = 3
-                    for idx, row in preview.iterrows():
-                        if "TV TOP" in str(row.values).upper() or "THÀNH VIÊN" in str(row.values).upper():
-                            h_row = idx; break
-                    df = pd.read_excel(xls, sheet_name=sheet, header=h_row)
-                    
-                    hist_map = {}
-                    for col in df.columns:
-                        d_obj = parse_date_smart(col, f_m, f_y)
-                        if d_obj: hist_map[d_obj] = col
-                    
-                    data_map = {}
-                    for col in df.columns:
-                        c_upper = str(col).strip().upper()
-                        if "SX" in c_upper: c_upper = c_upper.replace("SX", "6X")
-                        if re.match(r'^\d+X$', c_upper):
-                            data_map[c_upper.lower()] = col
+                    preview = pd.read_csv(file, header=None, nrows=20, encoding='utf-8')
+                    file.seek(0)
+                    df_raw = pd.read_csv(file, header=None, encoding='utf-8')
+                except:
+                    file.seek(0)
+                    try:
+                        preview = pd.read_csv(file, header=None, nrows=20, encoding='latin-1')
+                        file.seek(0)
+                        df_raw = pd.read_csv(file, header=None, encoding='latin-1')
+                    except: continue
 
-                    kq_row = None
-                    for idx, row in df.iterrows():
-                        if str(row.values[0]).strip().upper() == "KQ": kq_row = row; break
-                    if kq_row is not None:
-                        for d_val, c_name in hist_map.items():
-                            val = str(kq_row[c_name])
-                            nums = get_nums(val)
-                            if nums: kq_db[d_val] = nums[0]
+                h_row = find_header_row(preview)
+                df = df_raw.iloc[h_row+1:].copy()
+                df.columns = df_raw.iloc[h_row]
+                dfs_to_process.append((date_from_name, df))
 
-                    cache[t_date] = {'df': df, 'hist_map': hist_map, 'data_map': data_map}
-                except: continue
-        except: continue
+            for t_date, df in dfs_to_process:
+                df.columns = [str(c).strip().upper() for c in df.columns]
+                hist_map = {}
+                for col in df.columns:
+                    if "UNNAMED" in col: continue
+                    d_obj = parse_date_smart(col, f_m, f_y)
+                    if d_obj: hist_map[d_obj] = col
+                
+                data_map = {}
+                for col in df.columns:
+                    c_clean = col.replace(" ", "").replace("SX", "6X")
+                    if re.match(r'^\d+X$', c_clean):
+                        data_map[c_clean.lower()] = col
+
+                kq_row = None
+                if not df.empty:
+                    for c_idx in range(min(2, len(df.columns))):
+                        col_check = df.columns[c_idx]
+                        for idx, val in df[col_check].astype(str).items():
+                            if "KQ" in val.upper() or "KẾT QUẢ" in val.upper():
+                                kq_row = df.loc[idx]
+                                break
+                        if kq_row is not None: break
+                
+                if kq_row is not None:
+                    for d_val, c_name in hist_map.items():
+                        val = str(kq_row[c_name])
+                        nums = get_nums(val)
+                        if nums: kq_db[d_val] = nums[0]
+
+                cache[t_date] = {'df': df, 'hist_map': hist_map, 'data_map': data_map}
+
+        except Exception as e:
+            err_logs.append(f"Lỗi file '{file.name}': {str(e)}")
+            continue
+            
+    if err_logs:
+        with st.expander(f"⚠️ Đã bỏ qua {len(err_logs)} file lỗi", expanded=False):
+            for e in err_logs: st.write(e)
+            
     return cache, kq_db
 
-# --- HÀM TÍNH TOÁN CORE (NÂNG CẤP VỚI THAM SỐ CẮT) ---
-def calculate_v24_upgrade(target_date, rolling_window, cache, kq_db, limits_config):
-    if target_date not in cache: return None, "Chưa có Sheet dữ liệu."
+# --- HÀM TÍNH TOÁN CORE ---
+def calculate_v24_final(target_date, rolling_window, cache, kq_db, limits_config):
+    if target_date not in cache: return None, "Chưa có dữ liệu."
     
     curr_data = cache[target_date]
     df = curr_data['df']
     
     prev_date = target_date - timedelta(days=1)
+    if prev_date not in cache and (target_date - timedelta(days=2)) in cache:
+         prev_date = target_date - timedelta(days=2)
+
     col_hist_used = curr_data['hist_map'].get(prev_date)
-    df_source = df
-    
     if not col_hist_used and prev_date in cache:
         col_hist_used = cache[prev_date]['hist_map'].get(prev_date)
-        df_source = cache[prev_date]['df']
         
     if not col_hist_used:
         return None, f"Không tìm thấy cột dữ liệu ngày {prev_date.strftime('%d/%m')}."
 
-    # --- PHẦN BACKTEST ---
     groups = [f"{i}x" for i in range(10)]
-    stats_std = {g: {'wins': 0, 'ranks': []} for g in groups} # Dàn Gốc
-    stats_mod = {g: {'wins': 0} for g in groups}              # Dàn Modified
+    stats_std = {g: {'wins': 0, 'ranks': []} for g in groups}
+    stats_mod = {g: {'wins': 0} for g in groups}
 
-    past_dates = [target_date - timedelta(days=i) for i in range(1, rolling_window + 1)]
-    
+    past_dates = []
+    check_d = target_date - timedelta(days=1)
+    while len(past_dates) < rolling_window:
+        if check_d in cache and check_d in kq_db:
+            past_dates.append(check_d)
+        check_d -= timedelta(days=1)
+        if (target_date - check_d).days > 35: break
+
     for d in past_dates:
-        if d not in kq_db or d not in cache: continue
         d_df = cache[d]['df']
-        d_prev = d - timedelta(days=1)
-        d_hist_col = cache[d]['hist_map'].get(d_prev)
+        d_hist_col = None
+        sorted_dates = sorted([k for k in cache[d]['hist_map'].keys() if k < d], reverse=True)
+        if sorted_dates: d_hist_col = cache[d]['hist_map'][sorted_dates[0]]
+        
         if not d_hist_col: continue
         kq = kq_db[d]
         
@@ -188,8 +249,11 @@ def calculate_v24_upgrade(target_date, rolling_window, cache, kq_db, limits_conf
         d_score_mod = {c: get_col_score(c, SCORE_MAPPING_MOD) for c in d_df.columns if get_col_score(c, SCORE_MAPPING_MOD) > 0}
 
         for g in groups:
-            mask = d_df[d_hist_col].astype(str).apply(lambda x: re.sub(r'[^0-9X]', '', x.upper().replace('S','6'))) == g.upper()
-            mems = d_df[mask]
+            try:
+                mask = d_df[d_hist_col].astype(str).apply(lambda x: re.sub(r'[^0-9X]', '', x.upper().replace('S','6'))) == g.upper()
+                mems = d_df[mask]
+            except: continue
+            
             if mems.empty: 
                 stats_std[g]['ranks'].append(999)
                 continue
@@ -208,20 +272,15 @@ def calculate_v24_upgrade(target_date, rolling_window, cache, kq_db, limits_conf
                                 p_votes.add(n)
                 return sorted(num_stats.keys(), key=lambda n: (-num_stats[n]['score'], -num_stats[n]['votes'], int(n)))[:top_n]
 
-            # 1. Backtest Standard (Top 80 - Để xếp hạng nhóm chuẩn nhất)
             top80_std = get_top_nums(mems, d_score_std, 80)
             if kq in top80_std:
                 stats_std[g]['wins'] += 1
                 stats_std[g]['ranks'].append(top80_std.index(kq) + 1)
-            else:
-                stats_std[g]['ranks'].append(999)
+            else: stats_std[g]['ranks'].append(999)
             
-            # 2. Backtest Modified (Lấy theo LIMIT_MODIFIED)
             top86_mod = get_top_nums(mems, d_score_mod, limits_config['mod'])
-            if kq in top86_mod:
-                stats_mod[g]['wins'] += 1
+            if kq in top86_mod: stats_mod[g]['wins'] += 1
 
-    # --- TỔNG HỢP KẾT QUẢ BACKTEST ---
     final_std = []
     for g, inf in stats_std.items(): final_std.append((g, -inf['wins'], sum(inf['ranks'])))
     final_std.sort(key=lambda x: (x[1], x[2]))
@@ -229,131 +288,162 @@ def calculate_v24_upgrade(target_date, rolling_window, cache, kq_db, limits_conf
 
     best_mod_grp = sorted(stats_mod.keys(), key=lambda g: -stats_mod[g]['wins'])[0]
     
-    # --- DỰ ĐOÁN CHO NGÀY TARGET ---
-    def get_target_group_nums(group_list, score_mapping, limit_dict=None, fixed_limit=None):
-        sets_of_nums = []
-        hist_series = df_source[col_hist_used].astype(str).apply(lambda x: re.sub(r'[^0-9X]', '', x.upper().replace('S','6')))
-        L = min(len(df), len(hist_series))
+    # Dự đoán
+    hist_series = df[col_hist_used].astype(str).apply(lambda x: re.sub(r'[^0-9X]', '', x.upper().replace('S','6')))
+    
+    def get_group_set(group_name, score_map, limit):
+        mask = hist_series == group_name.upper()
+        valid_mems = df[mask]
+        curr_scores = {c: get_col_score(c, score_map) for c in df.columns if get_col_score(c, score_map) > 0}
         
-        curr_score_cols = {c: get_col_score(c, score_mapping) for c in df.columns if get_col_score(c, score_mapping) > 0}
+        local_stats = {}
+        for _, r in valid_mems.iterrows():
+            p_votes = set()
+            for sc_col, pts in curr_scores.items():
+                if sc_col not in valid_mems.columns: continue
+                for n in get_nums(r[sc_col]):
+                    if n not in local_stats: local_stats[n] = {'score':0, 'votes':0}
+                    local_stats[n]['score'] += pts
+                    if n not in p_votes:
+                        local_stats[n]['votes'] += 1
+                        p_votes.add(n)
+        return set(sorted(local_stats.keys(), key=lambda n: (-local_stats[n]['score'], -local_stats[n]['votes'], int(n)))[:limit])
 
-        for g in group_list:
-            mask = hist_series.iloc[:L] == g.upper()
-            valid_mems = df.iloc[:L][mask.values]
-            
-            local_stats = {}
-            for _, r in valid_mems.iterrows():
-                p_votes = set()
-                for sc_col, pts in curr_score_cols.items():
-                    if sc_col not in valid_mems.columns: continue
-                    for n in get_nums(r[sc_col]):
-                        if n not in local_stats: local_stats[n] = {'score':0, 'votes':0}
-                        local_stats[n]['score'] += pts
-                        if n not in p_votes:
-                            local_stats[n]['votes'] += 1
-                            p_votes.add(n)
-            
-            sorted_nums = sorted(local_stats.keys(), key=lambda n: (-local_stats[n]['score'], -local_stats[n]['votes'], int(n)))
-            
-            limit = 60
-            if fixed_limit: limit = fixed_limit
-            elif limit_dict: limit = limit_dict.get(g, 60)
-            
-            sets_of_nums.append(set(sorted_nums[:limit]))
-        return sets_of_nums
-
-    # --- ÁP DỤNG CẤU HÌNH CẮT SỐ MỚI CHO DÀN GỐC ---
-    # Thay vì fix cứng 80, 65, 60, ta lấy từ limits_config
     limits_std = {
         top6_std[0]: limits_config['l12'], top6_std[1]: limits_config['l12'], 
         top6_std[2]: limits_config['l34'], top6_std[3]: limits_config['l34'], 
         top6_std[4]: limits_config['l56'], top6_std[5]: limits_config['l56']
     }
     
-    s1_list = get_target_group_nums([top6_std[0], top6_std[5], top6_std[3]], SCORE_MAPPING_STD, limit_dict=limits_std)
-    s2_list = get_target_group_nums([top6_std[1], top6_std[4], top6_std[2]], SCORE_MAPPING_STD, limit_dict=limits_std)
+    pool1 = []
+    for g in [top6_std[0], top6_std[5], top6_std[3]]: pool1.extend(list(get_group_set(g, SCORE_MAPPING_STD, limits_std[g])))
+    s1 = {n for n, c in Counter(pool1).items() if c >= 2}
     
-    def pool_alliance(sets):
-        pool = []
-        for s in sets: pool.extend(list(s))
-        return {n for n, c in Counter(pool).items() if c >= 2}
+    pool2 = []
+    for g in [top6_std[1], top6_std[4], top6_std[2]]: pool2.extend(list(get_group_set(g, SCORE_MAPPING_STD, limits_std[g])))
+    s2 = {n for n, c in Counter(pool2).items() if c >= 2}
+    
+    final_original = sorted(list(s1.intersection(s2)))
+    final_modified = sorted(list(get_group_set(best_mod_grp, SCORE_MAPPING_MOD, limits_config['mod'])))
+    final_intersect = sorted(list(set(final_original).intersection(set(final_modified))))
 
-    set_alliance_1 = pool_alliance(s1_list)
-    set_alliance_2 = pool_alliance(s2_list)
-    final_original_set = sorted(list(set_alliance_1.intersection(set_alliance_2)))
-
-    # --- DÀN MODIFIED (Lấy theo cấu hình) ---
-    mod_list = get_target_group_nums([best_mod_grp], SCORE_MAPPING_MOD, fixed_limit=limits_config['mod'])
-    final_modified_set = sorted(list(mod_list[0])) if mod_list else []
-
-    # --- DÀN GIAO THOA (FINAL) ---
-    final_intersection = sorted(list(set(final_original_set).intersection(set(final_modified_set))))
-
-    results = {
+    return {
         "top6_std": top6_std,
         "best_mod": best_mod_grp,
-        "dan_goc": final_original_set,
-        "dan_mod": final_modified_set,
-        "dan_final": final_intersection,
+        "dan_goc": final_original,
+        "dan_mod": final_modified,
+        "dan_final": final_intersect,
         "source_col": col_hist_used
-    }
-    return results, None
+    }, None
 
 # --- UI ---
 if uploaded_files:
     data_cache, kq_db = load_data_v24(uploaded_files)
-    st.success(f"✅ Đã đọc {len(data_cache)} ngày dữ liệu.")
     
-    last_d = max(data_cache.keys()) if data_cache else datetime.date.today()
-    target = st.date_input("📅 Chọn ngày dự đoán:", value=last_d)
-    
-    # Đóng gói cấu hình giới hạn
-    limit_cfg = {
-        'l12': L_TOP_12,
-        'l34': L_TOP_34,
-        'l56': L_TOP_56,
-        'mod': LIMIT_MODIFIED
-    }
-    
-    if st.button("🚀 CHẠY PHÂN TÍCH", type="primary"):
-        with st.spinner("Đang tính toán với cấu hình tùy chỉnh..."):
-            res, err = calculate_v24_upgrade(target, ROLLING_WINDOW, data_cache, kq_db, limit_cfg)
-            
-        if err: st.error(err)
-        else:
-            st.info(f"Dữ liệu phân nhóm dựa trên cột: {res['source_col']}")
-            
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                st.subheader("1️⃣ Dàn Gốc")
-                st.caption(f"Top 6: {', '.join(res['top6_std'])}")
-                st.text_area(f"SL: {len(res['dan_goc'])} số", ",".join(res['dan_goc']), height=150)
-                st.markdown(f"*Cắt: {L_TOP_12} - {L_TOP_34} - {L_TOP_56}*")
-            
-            with c2:
-                st.subheader("2️⃣ Modified")
-                st.caption(f"Best Group: {res['best_mod']}")
-                st.text_area(f"SL: {len(res['dan_mod'])} số", ",".join(res['dan_mod']), height=150)
-                st.markdown(f"*Cắt: {LIMIT_MODIFIED}*")
-                
-            with c3:
-                st.subheader("3️⃣ FINAL (Chốt)")
-                st.caption("Giao thoa (1) & (2)")
-                st.warning(f"**{len(res['dan_final'])} Số:**")
-                st.code(",".join(res['dan_final']), language="text")
+    if data_cache:
+        limit_cfg = {'l12': L_TOP_12, 'l34': L_TOP_34, 'l56': L_TOP_56, 'mod': LIMIT_MODIFIED}
+        last_d = max(data_cache.keys())
+        
+        # --- TAB CHUYỂN ĐỔI ---
+        tab1, tab2 = st.tabs(["📊 DỰ ĐOÁN HÔM NAY", "🔙 BACKTEST QUÁ KHỨ"])
+        
+        # TAB 1: DỰ ĐOÁN
+        with tab1:
+            st.subheader("Dự đoán hàng ngày")
+            target = st.date_input("📅 Ngày dự đoán:", value=last_d)
+            if st.button("🚀 CHẠY DỰ ĐOÁN", type="primary"):
+                with st.spinner("Đang tính toán..."):
+                    res, err = calculate_v24_final(target, ROLLING_WINDOW, data_cache, kq_db, limit_cfg)
+                    if err: st.error(err)
+                    else:
+                        st.info(f"Phân nhóm dựa trên ngày: {res['source_col']}")
+                        c1, c2, c3 = st.columns(3)
+                        with c1:
+                            st.subheader("1️⃣ Dàn Gốc")
+                            st.caption(f"Top 6: {', '.join(res['top6_std'])}")
+                            st.text_area(f"Original ({len(res['dan_goc'])} số):", ",".join(res['dan_goc']), height=150)
+                        with c2:
+                            st.subheader("2️⃣ Modified")
+                            st.caption(f"Best: {res['best_mod']}")
+                            st.text_area(f"Modified ({len(res['dan_mod'])} số):", ",".join(res['dan_mod']), height=150)
+                        with c3:
+                            st.subheader("3️⃣ FINAL")
+                            st.caption("Giao thoa (1) & (2)")
+                            st.code(",".join(res['dan_final']), language="text")
+                            st.metric("Số lượng", f"{len(res['dan_final'])} số")
+                        
+                        if target in kq_db:
+                            real = kq_db[target]
+                            st.markdown("---")
+                            if real in res['dan_final']:
+                                st.success(f"🎉 CHÚC MỪNG! KQ **{real}** TRÚNG FINAL!")
+                            else:
+                                st.error(f"❌ Kết quả **{real}** trượt Final.")
 
-            # Check KQ
-            if target in kq_db:
-                real = kq_db[target]
-                is_win = real in res['dan_final']
-                st.markdown("---")
-                st.markdown(f"### 🎲 Kết quả thực tế: **{real}**")
-                if is_win: st.balloons(); st.success(f"🎉 CHÚC MỪNG! ĂN DÀN FINAL ({len(res['dan_final'])} số)")
+        # TAB 2: BACKTEST
+        with tab2:
+            st.subheader("Kiểm thử quá khứ (Backtest)")
+            
+            c_bt_1, c_bt_2 = st.columns(2)
+            with c_bt_1:
+                date_range = st.date_input("Chọn khoảng ngày test:", [last_d - timedelta(days=7), last_d])
+            with c_bt_2:
+                # TÙY CHỌN DÀN ĐỂ BACKTEST
+                bt_mode = st.radio("Chọn dàn để kiểm tra:", ["FINAL (Giao thoa)", "Dàn Gốc (Original)", "Dàn Modified"], horizontal=True)
+
+            if st.button("🔄 CHẠY BACKTEST"):
+                if len(date_range) < 2:
+                    st.warning("Vui lòng chọn đủ Ngày bắt đầu và Ngày kết thúc.")
                 else:
-                    win_goc = real in res['dan_goc']
-                    win_mod = real in res['dan_mod']
-                    msg = []
-                    if win_goc: msg.append("Ăn Dàn Gốc")
-                    if win_mod: msg.append("Ăn Dàn Mod")
-                    if msg: st.warning(f"❌ Trượt Final, nhưng {' & '.join(msg)}")
-                    else: st.error("❌ TRƯỢT TẤT CẢ CÁC DÀN")
+                    start_date, end_date = date_range[0], date_range[1]
+                    logs = []
+                    
+                    progress_bar = st.progress(0)
+                    total_days = (end_date - start_date).days + 1
+                    
+                    for i in range(total_days):
+                        current_d = start_date + timedelta(days=i)
+                        progress_bar.progress((i + 1) / total_days)
+                        
+                        if current_d not in kq_db: continue # Chỉ test ngày có KQ
+                        
+                        try:
+                            res, err = calculate_v24_final(current_d, ROLLING_WINDOW, data_cache, kq_db, limit_cfg)
+                            if err: continue
+                            
+                            real_val = kq_db[current_d]
+                            
+                            # Lấy dàn số tương ứng với tùy chọn
+                            if bt_mode == "FINAL (Giao thoa)":
+                                target_set = res['dan_final']
+                            elif bt_mode == "Dàn Gốc (Original)":
+                                target_set = res['dan_goc']
+                            else:
+                                target_set = res['dan_mod']
+                            
+                            is_win = real_val in target_set
+                            logs.append({
+                                "Ngày": current_d.strftime("%d/%m"),
+                                "KQ": real_val,
+                                "Trạng thái": "WIN 🎉" if is_win else "MISS ❌",
+                                "Số lượng": len(target_set),
+                                "Chi tiết số": ",".join(target_set) if len(target_set) < 20 else f"{len(target_set)} số (Bấm xem)"
+                            })
+                        except: pass
+                    
+                    progress_bar.empty()
+                    
+                    # Hiển thị kết quả
+                    if logs:
+                        df_logs = pd.DataFrame(logs)
+                        wins = df_logs[df_logs["Trạng thái"].str.contains("WIN")].shape[0]
+                        total = df_logs.shape[0]
+                        rate = (wins/total)*100 if total > 0 else 0
+                        
+                        st.metric(f"Tỉ lệ trúng ({bt_mode})", f"{wins}/{total}", f"{rate:.1f}%")
+                        st.dataframe(df_logs, use_container_width=True)
+                    else:
+                        st.warning("Không có dữ liệu hoặc không tính toán được trong khoảng thời gian này.")
+
+    else:
+        st.error("Không đọc được dữ liệu nào hợp lệ. Vui lòng kiểm tra file.")
