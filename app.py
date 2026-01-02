@@ -5,19 +5,19 @@ from collections import Counter
 import io
 
 # --- CẤU HÌNH GIAO DIỆN ---
-st.set_page_config(page_title="Dự Đoán Xổ Số", page_icon="🚀")
-st.title("🚀 Ứng Dụng Phân Tích Dữ Liệu")
+st.set_page_config(page_title="Dự Đoán Excel", page_icon="📊")
+st.title("📊 Phân Tích File Excel")
 
-# --- SIDEBAR (THANH BÊN) ---
+# --- SIDEBAR ---
 with st.sidebar:
     st.header("⚙️ Cấu hình")
     TARGET_DAY = st.number_input("Chọn Ngày (Target Day)", min_value=1, max_value=31, value=1)
-    TARGET_MONTH = st.text_input("Tháng (Ví dụ: 01)", value="01")
-    TARGET_YEAR_PREFIX = st.text_input("Năm (Ví dụ: 2026)", value="2026")
+    TARGET_MONTH = st.text_input("Tháng", value="01")
     ROLLING_WINDOW = st.number_input("Chu kỳ (Rolling Window)", min_value=1, value=10)
-    uploaded_files = st.file_uploader("📂 Tải file CSV vào đây", accept_multiple_files=True, type=['csv'])
+    # Đổi sang nhận file Excel (.xlsx)
+    uploaded_file = st.file_uploader("📂 Tải file Excel (.xlsx) vào đây", type=['xlsx'])
 
-# --- CÁC HÀM XỬ LÝ ---
+# --- HÀM XỬ LÝ ---
 SCORE_MAPPING = {
     'M10': 50, 'M9': 25, 'M8': 15, 'M7': 7, 'M6': 6, 'M5': 5,
     'M4': 4, 'M3': 3, 'M2': 2, 'M1': 1, 'M0': 0
@@ -52,45 +52,48 @@ def get_header_row_index(df_raw):
     return 3
 
 @st.cache_data(ttl=600)
-def load_data_from_upload(files):
+def load_data_from_excel(excel_file):
     data_cache = {}
     kq_db = {}
-    for uploaded_file in files:
-        try:
-            base = uploaded_file.name
-            match = re.search(r'(\d+)', base)
-            if not match: continue
-            day = int(match.group(1))
-            
-            try: temp = pd.read_csv(uploaded_file, header=None, nrows=10, encoding='utf-8-sig')
-            except: 
-                uploaded_file.seek(0)
-                temp = pd.read_csv(uploaded_file, header=None, nrows=10, encoding='latin-1')
-            
-            h = get_header_row_index(temp)
-            uploaded_file.seek(0)
-            try: df = pd.read_csv(uploaded_file, header=h, encoding='utf-8-sig')
-            except: 
-                uploaded_file.seek(0)
-                df = pd.read_csv(uploaded_file, header=h, encoding='latin-1')
+    
+    # Đọc file Excel
+    try:
+        xls = pd.ExcelFile(excel_file)
+        # Duyệt qua từng Sheet (Từng trang)
+        for sheet_name in xls.sheet_names:
+            try:
+                # Tìm ngày dựa trên Tên Sheet (Ví dụ Sheet "1", "01", "Day 1")
+                match = re.search(r'(\d+)', sheet_name)
+                if not match: continue
+                day = int(match.group(1))
                 
-            df.columns = [clean_text(c) for c in df.columns]
-            data_cache[day] = df
-            
-            mask_kq = df.iloc[:, 0].astype(str).apply(clean_text).str.contains("KQ", na=False)
-            if mask_kq.any():
-                kq_row = df[mask_kq].iloc[0]
-                for c in sorted(df.columns):
-                    d_val = None
-                    if f"/{TARGET_MONTH}" in c: 
-                        try: d_val = int(c.split("/")[0])
-                        except: pass
-                    elif c.isdigit() and 1 <= int(c) <= 31: d_val = int(c)
-                    if d_val and 1 <= d_val <= 31:
-                        val = str(kq_row[c])
-                        nums = get_nums(val)
-                        if nums: kq_db[d_val] = nums[0]
-        except Exception: continue
+                # Đọc dữ liệu trong sheet
+                temp = pd.read_excel(xls, sheet_name=sheet_name, header=None, nrows=10)
+                h = get_header_row_index(temp)
+                df = pd.read_excel(xls, sheet_name=sheet_name, header=h)
+                
+                df.columns = [clean_text(c) for c in df.columns]
+                data_cache[day] = df
+                
+                # Tìm kết quả (KQ)
+                mask_kq = df.iloc[:, 0].astype(str).apply(clean_text).str.contains("KQ", na=False)
+                if mask_kq.any():
+                    kq_row = df[mask_kq].iloc[0]
+                    for c in sorted(df.columns):
+                        d_val = None
+                        if f"/{TARGET_MONTH}" in c: 
+                            try: d_val = int(c.split("/")[0])
+                            except: pass
+                        elif c.isdigit() and 1 <= int(c) <= 31: d_val = int(c)
+                        
+                        if d_val and 1 <= d_val <= 31:
+                            val = str(kq_row[c])
+                            nums = get_nums(val)
+                            if nums: kq_db[d_val] = nums[0]
+            except Exception: continue
+    except Exception as e:
+        st.error(f"Lỗi đọc file Excel: {e}")
+        
     return data_cache, kq_db
 
 def get_group_top_n_stable(df, group_name, grp_col, limit=80):
@@ -127,10 +130,12 @@ def get_group_top_n_stable(df, group_name, grp_col, limit=80):
     return all_nums[:limit]
 
 # --- MAIN ---
-if uploaded_files:
+if uploaded_file:
     if st.button("🚀 BẮT ĐẦU PHÂN TÍCH"):
-        data_cache, kq_db = load_data_from_upload(uploaded_files)
-        st.success(f"✅ Đã tải {len(data_cache)} ngày.")
+        with st.spinner("Đang đọc file Excel..."):
+            data_cache, kq_db = load_data_from_excel(uploaded_file)
+        
+        st.success(f"✅ Đã tải được {len(data_cache)} sheet (ngày) từ file Excel.")
         
         start_hist = max(1, TARGET_DAY - ROLLING_WINDOW)
         end_hist = TARGET_DAY - 1
@@ -199,7 +204,7 @@ if uploaded_files:
                 
                 csv = pd.DataFrame(final_result, columns=["So"]).to_csv(index=False).encode('utf-8')
                 st.download_button("📥 Tải về CSV", csv, "ketqua.csv", "text/csv")
-            else: st.error(f"Không tìm thấy cột ngày {prev} trong file ngày {TARGET_DAY}")
-        else: st.error(f"Thiếu file ngày {TARGET_DAY}")
+            else: st.error(f"Không tìm thấy cột ngày {prev} trong dữ liệu ngày {TARGET_DAY}")
+        else: st.error(f"Trong file Excel không có sheet nào tên là '{TARGET_DAY}' hoặc chứa số {TARGET_DAY}")
 else:
-    st.info("👈 Vui lòng tải file ở thanh bên trái!")
+    st.info("👈 Vui lòng tải file Excel (.xlsx) ở thanh bên trái!")
