@@ -4,20 +4,11 @@ import re
 from collections import Counter
 import io
 
-# --- CẤU HÌNH GIAO DIỆN ---
-st.set_page_config(page_title="Dự Đoán Excel", page_icon="📊")
-st.title("📊 Phân Tích File Excel")
+# --- CẤU HÌNH ---
+st.set_page_config(page_title="Siêu Backtest Đa File", page_icon="📈", layout="wide")
+st.title("📈 Phân Tích & Gộp Nhiều File")
 
-# --- SIDEBAR ---
-with st.sidebar:
-    st.header("⚙️ Cấu hình")
-    TARGET_DAY = st.number_input("Chọn Ngày (Target Day)", min_value=1, max_value=31, value=1)
-    TARGET_MONTH = st.text_input("Tháng", value="01")
-    ROLLING_WINDOW = st.number_input("Chu kỳ (Rolling Window)", min_value=1, value=10)
-    # Đổi sang nhận file Excel (.xlsx)
-    uploaded_file = st.file_uploader("📂 Tải file Excel (.xlsx) vào đây", type=['xlsx'])
-
-# --- HÀM XỬ LÝ ---
+# --- HÀM XỬ LÝ (CORE LOGIC) ---
 SCORE_MAPPING = {
     'M10': 50, 'M9': 25, 'M8': 15, 'M7': 7, 'M6': 6, 'M5': 5,
     'M4': 4, 'M3': 3, 'M2': 2, 'M1': 1, 'M0': 0
@@ -51,49 +42,51 @@ def get_header_row_index(df_raw):
         if "THANHVIEN" in row_str and "STT" in row_str: return i
     return 3
 
+# --- HÀM ĐỌC NHIỀU FILE ---
 @st.cache_data(ttl=600)
-def load_data_from_excel(excel_file):
+def load_data_multifile(uploaded_files, target_month):
     data_cache = {}
     kq_db = {}
     
-    # Đọc file Excel
-    try:
-        xls = pd.ExcelFile(excel_file)
-        # Duyệt qua từng Sheet (Từng trang)
-        for sheet_name in xls.sheet_names:
-            try:
-                # Tìm ngày dựa trên Tên Sheet (Ví dụ Sheet "1", "01", "Day 1")
-                match = re.search(r'(\d+)', sheet_name)
-                if not match: continue
-                day = int(match.group(1))
-                
-                # Đọc dữ liệu trong sheet
-                temp = pd.read_excel(xls, sheet_name=sheet_name, header=None, nrows=10)
-                h = get_header_row_index(temp)
-                df = pd.read_excel(xls, sheet_name=sheet_name, header=h)
-                
-                df.columns = [clean_text(c) for c in df.columns]
-                data_cache[day] = df
-                
-                # Tìm kết quả (KQ)
-                mask_kq = df.iloc[:, 0].astype(str).apply(clean_text).str.contains("KQ", na=False)
-                if mask_kq.any():
-                    kq_row = df[mask_kq].iloc[0]
-                    for c in sorted(df.columns):
-                        d_val = None
-                        if f"/{TARGET_MONTH}" in c: 
-                            try: d_val = int(c.split("/")[0])
-                            except: pass
-                        elif c.isdigit() and 1 <= int(c) <= 31: d_val = int(c)
-                        
-                        if d_val and 1 <= d_val <= 31:
-                            val = str(kq_row[c])
-                            nums = get_nums(val)
-                            if nums: kq_db[d_val] = nums[0]
-            except Exception: continue
-    except Exception as e:
-        st.error(f"Lỗi đọc file Excel: {e}")
-        
+    # Sắp xếp file để đảm bảo file tháng cũ nạp trước, file tháng mới nạp sau (ghi đè)
+    # Logic: Dữ liệu tháng hiện tại (Target) sẽ được ưu tiên nhất
+    sorted_files = sorted(uploaded_files, key=lambda x: x.name)
+    
+    for file in sorted_files:
+        try:
+            xls = pd.ExcelFile(file)
+            for sheet_name in xls.sheet_names:
+                try:
+                    match = re.search(r'(\d+)', sheet_name)
+                    if not match: continue
+                    day = int(match.group(1))
+                    
+                    temp = pd.read_excel(xls, sheet_name=sheet_name, header=None, nrows=10)
+                    h = get_header_row_index(temp)
+                    df = pd.read_excel(xls, sheet_name=sheet_name, header=h)
+                    df.columns = [clean_text(c) for c in df.columns]
+                    
+                    # Lưu vào bộ nhớ (Nếu ngày trùng nhau, file nạp sau sẽ ghi đè - đúng tính chất nối tháng)
+                    data_cache[day] = df
+                    
+                    mask_kq = df.iloc[:, 0].astype(str).apply(clean_text).str.contains("KQ", na=False)
+                    if mask_kq.any():
+                        kq_row = df[mask_kq].iloc[0]
+                        for c in sorted(df.columns):
+                            d_val = None
+                            if f"/{target_month}" in c: 
+                                try: d_val = int(c.split("/")[0])
+                                except: pass
+                            elif c.isdigit() and 1 <= int(c) <= 31: d_val = int(c)
+                            
+                            if d_val and 1 <= d_val <= 31:
+                                val = str(kq_row[c])
+                                nums = get_nums(val)
+                                if nums: kq_db[d_val] = nums[0]
+                except Exception: continue
+        except Exception as e:
+            st.error(f"Lỗi đọc file {file.name}: {e}")
+            
     return data_cache, kq_db
 
 def get_group_top_n_stable(df, group_name, grp_col, limit=80):
@@ -108,13 +101,11 @@ def get_group_top_n_stable(df, group_name, grp_col, limit=80):
     valid_cols = []
     for c in sorted(df.columns):
         s = get_col_score(c)
-        if s > 0: 
-            col_scores[c] = s; valid_cols.append(c)
+        if s > 0: col_scores[c] = s; valid_cols.append(c)
 
     total_scores = Counter()
     vote_counts = Counter()
     subset = members[valid_cols]
-    
     for row in subset.itertuples(index=False):
         person_votes = set()
         for val, col_name in zip(row, valid_cols):
@@ -129,82 +120,154 @@ def get_group_top_n_stable(df, group_name, grp_col, limit=80):
     all_nums.sort(key=lambda n: (-total_scores[n], -vote_counts[n], int(n)))
     return all_nums[:limit]
 
-# --- MAIN ---
-if uploaded_file:
-    if st.button("🚀 BẮT ĐẦU PHÂN TÍCH"):
-        with st.spinner("Đang đọc file Excel..."):
-            data_cache, kq_db = load_data_from_excel(uploaded_file)
+def calculate_for_one_day(target_day, target_month, rolling_window, data_cache, kq_db):
+    start_hist = max(1, target_day - rolling_window)
+    end_hist = target_day - 1
+    groups = [f"{i}x" for i in range(10)]
+    stats = {g: {'wins': 0, 'ranks': []} for g in groups}
+    
+    for d in range(start_hist, end_hist + 1):
+        # Mẹo: Nếu d = 31 mà data_cache[31] là của tháng 12, code vẫn lấy đúng!
+        # Vì tháng 1 (hiện tại) chưa có ngày 31 để ghi đè lên.
+        if d not in data_cache or d not in kq_db: continue
+        df = data_cache[d]
+        prev = d - 1
+        raw_patterns = [str(prev), f"{prev:02d}", f"{prev}/{target_month}", f"{prev:02d}/{target_month}"]
+        if prev == 0: raw_patterns.extend(["30/11", "29/11", "31/12"]) # Xử lý ngày cuối năm
+        patterns = [clean_text(p) for p in raw_patterns]
         
-        st.success(f"✅ Đã tải được {len(data_cache)} sheet (ngày) từ file Excel.")
+        grp_col = None
+        for c in sorted(df.columns):
+            if c in patterns: grp_col = c; break
+        if not grp_col: continue
         
-        start_hist = max(1, TARGET_DAY - ROLLING_WINDOW)
-        end_hist = TARGET_DAY - 1
-        groups = [f"{i}x" for i in range(10)]
-        stats = {g: {'wins': 0, 'ranks': []} for g in groups}
+        kq = kq_db[d]
+        for g in groups:
+            top80_list = get_group_top_n_stable(df, g, grp_col, limit=80)
+            if kq in top80_list:
+                stats[g]['wins'] += 1
+                stats[g]['ranks'].append(top80_list.index(kq) + 1)
+            else: stats[g]['ranks'].append(999)
 
-        for d in range(start_hist, end_hist + 1):
-            if d not in data_cache or d not in kq_db: continue
-            df = data_cache[d]
-            prev = d - 1
-            raw_patterns = [str(prev), f"{prev:02d}", f"{prev}/{TARGET_MONTH}", f"{prev:02d}/{TARGET_MONTH}"]
-            if prev == 0: raw_patterns.extend(["30/11", "29/11", "31/12"])
-            patterns = [clean_text(p) for p in raw_patterns]
+    ranked_items = []
+    for g in sorted(stats.keys()):
+        data = stats[g]
+        ranked_items.append((g, (-data['wins'], sum(data['ranks']), sorted(data['ranks']), g)))
+    ranked_items.sort(key=lambda x: x[1])
+    top6 = [item[0] for item in ranked_items[:6]]
+    
+    final_result = []
+    if target_day in data_cache:
+        df_target = data_cache[target_day]
+        prev = target_day - 1
+        raw_patterns = [str(prev), f"{prev:02d}", f"{prev}/{target_month}", f"{prev:02d}/{target_month}"]
+        patterns = [clean_text(p) for p in raw_patterns]
+        grp_col_target = None
+        for c in sorted(df_target.columns):
+            if c in patterns: grp_col_target = c; break
+        
+        if grp_col_target:
+            limit_map = {top6[0]: 80, top6[1]: 80, top6[2]: 65, top6[3]: 65, top6[4]: 60, top6[5]: 60}
+            alliance_1 = [top6[0], top6[5], top6[3]]
+            alliance_2 = [top6[1], top6[4], top6[2]]
             
-            grp_col = None
-            for c in sorted(df.columns):
-                if c in patterns: grp_col = c; break
-            if not grp_col: continue
+            def process_alliance(alist, df, col, l_map):
+                sets = []
+                for g in alist:
+                    lst = get_group_top_n_stable(df, g, col, limit=l_map.get(g, 80))
+                    sets.append(set(lst)) 
+                all_n = []
+                for s in sets: all_n.extend(sorted(list(s)))
+                return {n for n, c in Counter(all_n).items() if c >= 2}
+
+            set_1 = process_alliance(alliance_1, df_target, grp_col_target, limit_map)
+            set_2 = process_alliance(alliance_2, df_target, grp_col_target, limit_map)
+            final_result = sorted(list(set_1.intersection(set_2)))
             
-            kq = kq_db[d]
-            for g in groups:
-                top80_list = get_group_top_n_stable(df, g, grp_col, limit=80)
-                if kq in top80_list:
-                    stats[g]['wins'] += 1
-                    stats[g]['ranks'].append(top80_list.index(kq) + 1)
-                else: stats[g]['ranks'].append(999)
+    return top6, final_result
 
-        ranked_items = []
-        for g in sorted(stats.keys()):
-            data = stats[g]
-            ranked_items.append((g, (-data['wins'], sum(data['ranks']), sorted(data['ranks']), g)))
+# --- GIAO DIỆN CHÍNH ---
+with st.sidebar:
+    st.header("⚙️ Cấu hình")
+    APP_MODE = st.radio("Chọn chế độ:", ["🎯 Dự đoán 1 ngày", "🛠️ Kiểm chứng (Backtest)"])
+    st.divider()
+    TARGET_MONTH = st.text_input("Tháng dữ liệu (Ví dụ: 01)", value="01")
+    ROLLING_WINDOW = st.number_input("Chu kỳ xét (Ngày)", min_value=1, value=10)
+    
+    # --- CẬP NHẬT QUAN TRỌNG: CHO PHÉP CHỌN NHIỀU FILE ---
+    uploaded_files = st.file_uploader("📂 Tải tất cả file Excel (.xlsx)", type=['xlsx'], accept_multiple_files=True)
 
-        ranked_items.sort(key=lambda x: x[1])
-        top6 = [item[0] for item in ranked_items[:6]]
-        st.info(f"🏆 TOP 6: {', '.join(top6)}")
+if uploaded_files:
+    # Load data
+    with st.spinner("Đang gộp dữ liệu từ các file..."):
+        data_cache, kq_db = load_data_multifile(uploaded_files, TARGET_MONTH)
+    
+    # Hiển thị thông báo thông minh
+    total_days = len(data_cache)
+    st.sidebar.success(f"✅ Đã tải xong {len(uploaded_files)} file.")
+    st.sidebar.info(f"Tổng số ngày trong bộ nhớ: {total_days}")
+
+    if APP_MODE == "🎯 Dự đoán 1 ngày":
+        st.subheader("🎯 Dự đoán cho một ngày cụ thể")
+        target_day = st.number_input("Chọn ngày muốn dự đoán:", min_value=1, max_value=31, value=1)
         
-        limit_map = {top6[0]: 80, top6[1]: 80, top6[2]: 65, top6[3]: 65, top6[4]: 60, top6[5]: 60}
-        alliance_1 = [top6[0], top6[5], top6[3]]
-        alliance_2 = [top6[1], top6[4], top6[2]]
-        
-        if TARGET_DAY in data_cache:
-            df_target = data_cache[TARGET_DAY]
-            prev = TARGET_DAY - 1
-            raw_patterns = [str(prev), f"{prev:02d}", f"{prev}/{TARGET_MONTH}", f"{prev:02d}/{TARGET_MONTH}"]
-            patterns = [clean_text(p) for p in raw_patterns]
-            grp_col_target = None
-            for c in sorted(df_target.columns):
-                if c in patterns: grp_col_target = c; break
+        if st.button("🚀 Phân Tích Ngay"):
+            # Kiểm tra xem có đủ dữ liệu quá khứ không
+            if target_day == 1 and 31 not in data_cache:
+                st.warning("⚠️ Cảnh báo: Bạn đang dự đoán ngày 1 nhưng chưa tải file tháng trước (thiếu ngày 31). Kết quả có thể không chính xác.")
             
-            if grp_col_target:
-                def process_alliance(alist, df, col, l_map):
-                    sets = []
-                    for g in alist:
-                        lst = get_group_top_n_stable(df, g, col, limit=l_map.get(g, 80))
-                        sets.append(set(lst)) 
-                    all_n = []
-                    for s in sets: all_n.extend(sorted(list(s)))
-                    return {n for n, c in Counter(all_n).items() if c >= 2}
+            with st.spinner("Đang tính toán..."):
+                top6, result = calculate_for_one_day(target_day, TARGET_MONTH, ROLLING_WINDOW, data_cache, kq_db)
+            
+            st.info(f"🏆 **TOP 6 GROUP:** {', '.join(top6)}")
+            st.success(f"**KẾT QUẢ DỰ ĐOÁN ({len(result)} số):**")
+            st.text_area("Copy dàn số:", ",".join(result))
+            
+            if target_day in kq_db:
+                real_kq = kq_db[target_day]
+                if real_kq in result:
+                    st.balloons(); st.success(f"🎉 CHÚC MỪNG! KQ **{real_kq}** ĐÃ TRÚNG.")
+                else: st.error(f"❌ Rất tiếc. KQ **{real_kq}** không có trong dàn.")
 
-                set_1 = process_alliance(alliance_1, df_target, grp_col_target, limit_map)
-                set_2 = process_alliance(alliance_2, df_target, grp_col_target, limit_map)
-                final_result = sorted(list(set_1.intersection(set_2)))
+    elif APP_MODE == "🛠️ Kiểm chứng (Backtest)":
+        st.subheader("🛠️ Chạy thử nghiệm Lịch sử")
+        c1, c2 = st.columns(2)
+        with c1: start_d = st.number_input("Từ ngày:", min_value=1, value=1)
+        with c2: end_d = st.number_input("Đến ngày:", min_value=1, value=total_days if total_days < 31 else 10)
+        
+        if st.button("⚡ Chạy Kiểm Chứng"):
+            if start_d > end_d: st.error("Ngày bắt đầu phải nhỏ hơn ngày kết thúc!")
+            else:
+                results_log = []
+                progress_bar = st.progress(0)
+                days_list = range(start_d, end_d + 1)
                 
-                st.success(f"🎯 KẾT QUẢ: {len(final_result)} SỐ")
-                st.text_area("Kết quả:", ",".join(final_result))
+                for idx, d in enumerate(days_list):
+                    progress_bar.progress((idx + 1) / len(days_list))
+                    try:
+                        _, pred_nums = calculate_for_one_day(d, TARGET_MONTH, ROLLING_WINDOW, data_cache, kq_db)
+                        actual = kq_db.get(d, "N/A")
+                        is_win = actual in pred_nums if actual != "N/A" else False
+                        status = "WIN ✅" if is_win else ("LOSS ❌" if actual != "N/A" else "Chưa có KQ")
+                        
+                        results_log.append({
+                            "Ngày": d, "KQ Thực": actual, "Trạng thái": status,
+                            "Số lượng": len(pred_nums), "Dàn số": ",".join(pred_nums)
+                        })
+                    except: pass
+                progress_bar.empty()
                 
-                csv = pd.DataFrame(final_result, columns=["So"]).to_csv(index=False).encode('utf-8')
-                st.download_button("📥 Tải về CSV", csv, "ketqua.csv", "text/csv")
-            else: st.error(f"Không tìm thấy cột ngày {prev} trong dữ liệu ngày {TARGET_DAY}")
-        else: st.error(f"Trong file Excel không có sheet nào tên là '{TARGET_DAY}' hoặc chứa số {TARGET_DAY}")
+                df_res = pd.DataFrame(results_log)
+                wins = df_res[df_res["Trạng thái"] == "WIN ✅"].shape[0]
+                total = df_res[df_res["KQ Thực"] != "N/A"].shape[0]
+                
+                m1, m2 = st.columns(2)
+                m1.metric("Số ngày Trúng", f"{wins}/{total}")
+                if total > 0: m2.metric("Tỷ lệ", f"{round((wins/total)*100, 1)}%")
+                
+                def color_rows(row):
+                    return ['background-color: #d4edda; color: black' if row["Trạng thái"] == "WIN ✅" else ('background-color: #f8d7da; color: black' if row["Trạng thái"] == "LOSS ❌" else '')] * len(row)
+                st.dataframe(df_res.style.apply(color_rows, axis=1), use_container_width=True)
+
 else:
-    st.info("👈 Vui lòng tải file Excel (.xlsx) ở thanh bên trái!")
+    st.info("👈 Hãy tải CẢ 2 FILE Excel (Tháng 12 & Tháng 1) vào ô bên trái.")
