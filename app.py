@@ -6,8 +6,8 @@ import datetime
 from datetime import timedelta
 
 # --- CẤU HÌNH ---
-st.set_page_config(page_title="Xổ Số V23 (Final Fix)", page_icon="🚀", layout="centered")
-st.title("🚀 V23: Fix Lỗi Backtest & Số Lượng")
+st.set_page_config(page_title="Xổ Số V24 (Logic Gốc)", page_icon="🎯", layout="centered")
+st.title("🎯 V24: Logic Chuẩn V3 (Bộ Lọc >= 2)")
 
 # --- 1. TẢI FILE ---
 uploaded_files = st.file_uploader("Tải file Excel (T12, T1...):", type=['xlsx'], accept_multiple_files=True)
@@ -41,13 +41,11 @@ def get_col_score(col_name):
 # --- XỬ LÝ NGÀY THÁNG ---
 def parse_date_smart(col_str, f_m, f_y):
     s = str(col_str).strip().upper()
-    # 1. Dạng YYYY-MM-DD
     match_iso = re.search(r'(20\d{2})[\.\-/](\d{1,2})[\.\-/](\d{1,2})', s)
     if match_iso:
         y, p1, p2 = int(match_iso.group(1)), int(match_iso.group(2)), int(match_iso.group(3))
         if p1 != f_m and p2 == f_m: return datetime.date(y, p2, p1)
         return datetime.date(y, p1, p2)
-    # 2. Dạng DD/MM
     match_slash = re.search(r'(\d{1,2})/(\d{1,2})', s)
     if match_slash:
         d, m = int(match_slash.group(1)), int(match_slash.group(2))
@@ -77,7 +75,7 @@ def get_sheet_date(sheet_name, f_m, f_y):
     except: return None
 
 @st.cache_data(ttl=600)
-def load_data_v23(files):
+def load_data_v24(files):
     cache = {} 
     kq_db = {}
     for file in files:
@@ -104,7 +102,6 @@ def load_data_v23(files):
                     data_map = {}
                     for col in df.columns:
                         c_upper = str(col).strip().upper()
-                        # Fix lỗi Sx -> 6x (Nếu có)
                         if "SX" in c_upper: c_upper = c_upper.replace("SX", "6X")
                         if re.match(r'^\d+X$', c_upper):
                             data_map[c_upper.lower()] = col
@@ -123,20 +120,19 @@ def load_data_v23(files):
         except: continue
     return cache, kq_db
 
-# --- HÀM TÍNH TOÁN CORE V23 (FIX BACKTEST) ---
-def calculate_v23(target_date, rolling_window, cache, kq_db):
+# --- HÀM TÍNH TOÁN CORE V24 (LOGIC V3) ---
+def calculate_v24(target_date, rolling_window, cache, kq_db):
     if target_date not in cache: return [], [], None, "Chưa có Sheet dữ liệu."
 
     curr_data = cache[target_date]
     df = curr_data['df']
     data_map = curr_data['data_map']
     
-    # 1. Tìm cột hôm qua (để phân nhóm cho ngày Target)
+    # 1. Tìm cột hôm qua
     prev_date = target_date - timedelta(days=1)
     col_hist_used = curr_data['hist_map'].get(prev_date)
     df_source = df
     
-    # Fallback sang sheet hôm qua
     if not col_hist_used and prev_date in cache:
         col_hist_used = cache[prev_date]['hist_map'].get(prev_date)
         df_source = cache[prev_date]['df']
@@ -152,18 +148,15 @@ def calculate_v23(target_date, rolling_window, cache, kq_db):
     past_dates = [target_date - timedelta(days=i) for i in range(1, rolling_window + 1)]
     for d in past_dates:
         if d not in kq_db or d not in cache: continue
+        # Lấy đúng sheet ngày d
         d_df = cache[d]['df']
-        
-        # [FIX] Tìm cột của ngày HÔM TRƯỚC (d-1) trong sheet ngày d
-        # Vì nhóm của ngày d được xác định bởi kết quả ngày d-1
         d_prev = d - timedelta(days=1)
-        d_hist_col = cache[d]['hist_map'].get(d_prev) 
-        
-        if not d_hist_col: continue # Không có cột phân nhóm -> Bỏ qua
+        # Lấy cột phân nhóm (d-1) trong sheet d
+        d_hist_col = cache[d]['hist_map'].get(d_prev)
+        if not d_hist_col: continue
         kq = kq_db[d]
         
         for g in groups:
-            # Lọc: Ai ở nhóm g vào ngày d-1?
             mask = d_df[d_hist_col].astype(str).apply(lambda x: re.sub(r'[^0-9X]', '', x.upper().replace('S','6'))) == g.upper()
             mems = d_df[mask]
             if mems.empty: stats[g]['ranks'].append(999); continue
@@ -171,7 +164,7 @@ def calculate_v23(target_date, rolling_window, cache, kq_db):
             col_data_name = cache[d]['data_map'].get(g)
             if not col_data_name: continue
             
-            # Tính điểm
+            # Logic tính điểm (Vote)
             num_stats = {}
             for _, r in mems.iterrows():
                 p_votes = set()
@@ -196,24 +189,27 @@ def calculate_v23(target_date, rolling_window, cache, kq_db):
     final.sort(key=lambda x: (x[1], x[2]))
     top6 = [x[0] for x in final[:6]]
 
-    # 3. DỰ ĐOÁN (Cắt gọt chuẩn)
+    # 3. DỰ ĐOÁN (QUAY VỀ LOGIC GỐC: >= 2 VÉ ĐỒNG THUẬN)
     limits = {
         top6[0]: 80, top6[1]: 80, 
         top6[2]: 65, top6[3]: 65, 
         top6[4]: 60, top6[5]: 60
     }
 
-    def get_alliance_set(alliance_groups):
-        alliance_pool = set()
+    def get_alliance_nums(alliance_groups):
+        sets_of_nums = [] # List các tập hợp số của từng nhóm
+        
         for g in alliance_groups:
             col_data = data_map.get(g)
             if not col_data: continue
 
+            # Lọc thành viên
             hist_series = df_source[col_hist_used].astype(str).apply(lambda x: re.sub(r'[^0-9X]', '', x.upper().replace('S','6')))
             L = min(len(df), len(hist_series))
             mask = hist_series.iloc[:L] == g.upper()
             valid_mems = df.iloc[:L][mask.values]
             
+            # Tính điểm & Cắt
             local_stats = {}
             for _, r in valid_mems.iterrows():
                 p_votes = set()
@@ -227,19 +223,29 @@ def calculate_v23(target_date, rolling_window, cache, kq_db):
             
             sorted_nums = sorted(local_stats.keys(), key=lambda n: (-local_stats[n]['score'], -local_stats[n]['votes'], int(n)))
             limit = limits.get(g, 60)
-            alliance_pool.update(sorted_nums[:limit])
             
-        return alliance_pool
+            # Lưu tập hợp số của nhóm này
+            sets_of_nums.append(set(sorted_nums[:limit]))
+            
+        # --- LOGIC CŨ: CHỈ LẤY SỐ XUẤT HIỆN Ở ÍT NHẤT 2 NHÓM ---
+        all_nums_flat = []
+        for s in sets_of_nums:
+            all_nums_flat.extend(list(s))
+            
+        # Đếm tần suất: Số nào xuất hiện >= 2 lần thì lấy
+        final_pool = {n for n, c in Counter(all_nums_flat).items() if c >= 2}
+        return final_pool
 
-    s1 = get_alliance_set([top6[0], top6[5], top6[3]])
-    s2 = get_alliance_set([top6[1], top6[4], top6[2]])
+    s1 = get_alliance_nums([top6[0], top6[5], top6[3]])
+    s2 = get_alliance_nums([top6[1], top6[4], top6[2]])
     
+    # Giao nhau của 2 liên minh
     final_result = sorted(list(s1.intersection(s2)))
     return top6, final_result, f"Cột {col_hist_used}", None
 
 # --- UI ---
 if uploaded_files:
-    data_cache, kq_db = load_data_v23(uploaded_files)
+    data_cache, kq_db = load_data_v24(uploaded_files)
     st.success(f"Đã đọc {len(data_cache)} ngày.")
     
     tab1, tab2 = st.tabs(["DỰ ĐOÁN", "BACKTEST"])
@@ -247,7 +253,7 @@ if uploaded_files:
         last_d = max(data_cache.keys()) if data_cache else datetime.date.today()
         target = st.date_input("Ngày:", value=last_d)
         if st.button("PHÂN TÍCH"):
-            top6, res, src, err = calculate_v23(target, ROLLING_WINDOW, data_cache, kq_db)
+            top6, res, src, err = calculate_v24(target, ROLLING_WINDOW, data_cache, kq_db)
             if err: st.error(err)
             else:
                 st.info(f"Dữ liệu phân nhóm: {src}")
@@ -269,7 +275,7 @@ if uploaded_files:
                 d = start + timedelta(days=i)
                 bar.progress((i+1)/(delta+1))
                 try:
-                    _, res, _, err = calculate_v23(d, ROLLING_WINDOW, data_cache, kq_db)
+                    _, res, _, err = calculate_v24(d, ROLLING_WINDOW, data_cache, kq_db)
                     if err: continue
                     real = kq_db.get(d, "N/A")
                     stt = "WIN" if real in res else "LOSS"
