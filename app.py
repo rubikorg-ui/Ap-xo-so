@@ -318,4 +318,37 @@ if uploaded_files:
         tab1, tab2 = st.tabs(["DỰ ĐOÁN", "BACKTEST"])
         
         with tab1:
-            d_max =
+            d_max = max(data_cache.keys())
+            sel_date = st.date_input("Chọn ngày:", value=d_max)
+            if st.button("CHẠY DỰ ĐOÁN", use_container_width=True):
+                top6, res, col_used = calculate_v13(sel_date, ROLLING_WINDOW, data_cache, kq_db)
+                
+                if not col_used:
+                    st.error(f"Không tìm thấy cột dữ liệu ngày hôm trước ({sel_date - timedelta(days=1)}) trong sheet này.")
+                else:
+                    st.info(f"Dữ liệu lấy từ cột: **{col_used}**")
+                    st.success(f"TOP 6: {', '.join(top6)}")
+                    st.code(",".join(res))
+                    if sel_date in kq_db:
+                        st.write(f"KQ Thực: **{kq_db[sel_date]}**")
+
+        with tab2:
+            c1, c2 = st.columns(2)
+            with c1: start = st.date_input("Từ:", value=d_max - timedelta(days=5))
+            with c2: end = st.date_input("Đến:", value=d_max)
+            if st.button("CHẠY BACKTEST", use_container_width=True):
+                delta = (end - start).days
+                logs = []
+                bar = st.progress(0)
+                for i in range(delta + 1):
+                    d = start + timedelta(days=i)
+                    bar.progress((i+1)/(delta+1))
+                    try:
+                        _, res, _ = calculate_v13(d, ROLLING_WINDOW, data_cache, kq_db)
+                        real = kq_db.get(d, "N/A")
+                        stt = "WIN" if real in res else "LOSS"
+                        if real == "N/A": stt = "-"
+                        logs.append({"Ngày": d.strftime("%d/%m"), "KQ": real, "TT": stt, "Số": len(res)})
+                    except: pass
+                bar.empty()
+                st.dataframe(pd.DataFrame(logs), use_container_width=True)
