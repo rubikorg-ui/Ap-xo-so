@@ -7,8 +7,8 @@ from datetime import timedelta
 import io
 
 # --- CẤU HÌNH ---
-st.set_page_config(page_title="Xổ Số V24 (Fix Upload)", page_icon="🎯", layout="wide")
-st.title("🎯 V24: Hỗ trợ Đa File (Tự động nhận diện)")
+st.set_page_config(page_title="Xổ Số V24 (Logic Rank Chi Tiết)", page_icon="🎯", layout="wide")
+st.title("🎯 V24: Xếp hạng chi tiết (So găng từng Rank)")
 
 # --- 1. TẢI FILE ---
 uploaded_files = st.file_uploader("Tải TẤT CẢ file CSV (Tháng 12, Tháng 1...):", type=['xlsx', 'csv'], accept_multiple_files=True)
@@ -25,7 +25,8 @@ with st.sidebar:
     L_TOP_56 = st.number_input("Top 5 & 6 lấy:", min_value=10, max_value=90, value=60)
     LIMIT_MODIFIED = st.number_input("Top 1 Modified lấy:", min_value=50, value=86)
 
-    if st.button("🗑️ Xóa Cache (Nếu lỗi)"):
+    st.markdown("---")
+    if st.button("🗑️ XÓA CACHE & LÀM MỚI", type="primary"):
         st.cache_data.clear()
         st.rerun()
 
@@ -44,7 +45,7 @@ SCORE_MAPPING_MOD = {
 }
 
 # ==============================================================================
-# HÀM XỬ LÝ DỮ LIỆU (NÂNG CẤP NHẬN DIỆN NGÀY)
+# HÀM XỬ LÝ DỮ LIỆU
 # ==============================================================================
 
 def get_nums(s):
@@ -93,23 +94,14 @@ def find_header_row(df_preview):
     return 3
 
 def extract_meta_from_filename(filename):
-    """
-    Trích xuất ngày tháng từ tên file - Phiên bản Fix mạnh mẽ hơn.
-    """
     clean_name = filename.upper().replace(".CSV", "").replace(".XLSX", "")
-    
-    # 1. Tìm năm trong tên file (Global Year)
     y_match = re.search(r'20\d{2}', clean_name)
     y_global = int(y_match.group(0)) if y_match else 2025
-    
-    # 2. Tìm tháng trong tên file (Global Month)
     m_match = re.search(r'(?:THANG|THÁNG|T)[^0-9]*(\d{1,2})', clean_name)
     m_global = int(m_match.group(1)) if m_match else 12
 
-    # 3. Tìm ngày cụ thể ở đuôi file (Quan trọng)
     target_date = None
     
-    # Ưu tiên 1: Tìm định dạng đầy đủ ngày.tháng.năm (vd: 1.1.2026)
     full_date_match = re.search(r'-\s*(\d{1,2})[\.\-](\d{1,2})[\.\-](20\d{2})$', clean_name)
     if full_date_match:
         try:
@@ -117,18 +109,15 @@ def extract_meta_from_filename(filename):
             return m, y, datetime.date(y, m, d)
         except: pass
 
-    # Ưu tiên 2: Tìm định dạng ngày.tháng (vd: 1.12)
     short_date_match = re.search(r'-\s*(\d{1,2})[\.\-](\d{1,2})$', clean_name)
     if short_date_match:
         try:
             d, m = int(short_date_match.group(1)), int(short_date_match.group(2))
-            # Xử lý chuyển năm (nếu file T12 nhưng đuôi là 1.1 -> có thể là năm sau)
             y = y_global
             if m == 1 and m_global == 12: y += 1
             return m, y, datetime.date(y, m, d)
         except: pass
         
-    # Ưu tiên 3: Chỉ có ngày (vd: - 31)
     day_only_match = re.search(r'-\s*(\d{1,2})$', clean_name)
     if day_only_match:
         try:
@@ -143,20 +132,16 @@ def load_data_v24(files):
     cache = {} 
     kq_db = {}
     err_logs = []
-    file_status = [] # Debug log
+    file_status = []
 
     for file in files:
-        # Bỏ qua file rác
-        if file.name.upper() == 'N.CSV' or file.name.startswith('~$'):
-            file_status.append(f"❌ Bỏ qua (File rác): {file.name}")
-            continue
+        if file.name.upper() == 'N.CSV' or file.name.startswith('~$'): continue
 
         f_m, f_y, date_from_name = extract_meta_from_filename(file.name)
         
         try:
             dfs_to_process = []
             
-            # FILE EXCEL
             if file.name.endswith('.xlsx'):
                 xls = pd.ExcelFile(file)
                 for sheet in xls.sheet_names:
@@ -177,12 +162,8 @@ def load_data_v24(files):
                         dfs_to_process.append((s_date, df))
                 file_status.append(f"✅ Excel OK: {file.name}")
 
-            # FILE CSV
             elif file.name.endswith('.csv'):
-                if not date_from_name: 
-                    file_status.append(f"⚠️ Không tìm thấy ngày trong tên file: {file.name}")
-                    continue
-                
+                if not date_from_name: continue
                 try:
                     preview = pd.read_csv(file, header=None, nrows=20, encoding='utf-8')
                     file.seek(0)
@@ -193,17 +174,14 @@ def load_data_v24(files):
                         preview = pd.read_csv(file, header=None, nrows=20, encoding='latin-1')
                         file.seek(0)
                         df_raw = pd.read_csv(file, header=None, encoding='latin-1')
-                    except: 
-                        file_status.append(f"❌ Lỗi Encoding: {file.name}")
-                        continue
+                    except: continue
 
                 h_row = find_header_row(preview)
                 df = df_raw.iloc[h_row+1:].copy()
                 df.columns = df_raw.iloc[h_row]
                 dfs_to_process.append((date_from_name, df))
-                file_status.append(f"✅ CSV OK: {file.name} -> Ngày {date_from_name}")
+                file_status.append(f"✅ CSV OK: {file.name} -> {date_from_name}")
 
-            # XỬ LÝ DATAFRAME
             for t_date, df in dfs_to_process:
                 df.columns = [str(c).strip().upper() for c in df.columns]
                 hist_map = {}
@@ -242,17 +220,15 @@ def load_data_v24(files):
             
     return cache, kq_db, file_status, err_logs
 
-# --- HÀM TÍNH TOÁN CORE ---
+# --- HÀM TÍNH TOÁN CORE (LOGIC RANK MỚI) ---
 def calculate_v24_final(target_date, rolling_window, cache, kq_db, limits_config):
     if target_date not in cache: return None, "Chưa có dữ liệu."
     
     curr_data = cache[target_date]
     df = curr_data['df']
     
-    # Tìm ngày hôm trước (Logic lùi ngày thông minh)
     prev_date = target_date - timedelta(days=1)
     if prev_date not in cache:
-        # Thử lùi tối đa 3 ngày (tránh tết/nghỉ)
         for i in range(2, 4):
             if (target_date - timedelta(days=i)) in cache:
                 prev_date = target_date - timedelta(days=i)
@@ -280,7 +256,6 @@ def calculate_v24_final(target_date, rolling_window, cache, kq_db, limits_config
     for d in past_dates:
         d_df = cache[d]['df']
         d_hist_col = None
-        # Tìm cột phân loại gần nhất trong quá khứ so với ngày d
         sorted_dates = sorted([k for k in cache[d]['hist_map'].keys() if k < d], reverse=True)
         if sorted_dates: d_hist_col = cache[d]['hist_map'][sorted_dates[0]]
         
@@ -323,14 +298,27 @@ def calculate_v24_final(target_date, rolling_window, cache, kq_db, limits_config
             top86_mod = get_top_nums(mems, d_score_mod, limits_config['mod'])
             if kq in top86_mod: stats_mod[g]['wins'] += 1
 
+    # --- SẮP XẾP NHÓM (LOGIC CHI TIẾT TỪNG RANK) ---
     final_std = []
-    for g, inf in stats_std.items(): final_std.append((g, -inf['wins'], sum(inf['ranks'])))
-    final_std.sort(key=lambda x: (x[1], x[2]))
-    top6_std = [x[0] for x in final_std[:6]]
-
-    best_mod_grp = sorted(stats_mod.keys(), key=lambda g: -stats_mod[g]['wins'])[0]
+    for g, inf in stats_std.items(): 
+        # Sắp xếp danh sách rank của nhóm từ bé đến lớn (Tốt -> Xấu)
+        # VD: [1, 20] so với [5, 16]. 
+        # Python so sánh list: 1 < 5 -> [1,20] nhỏ hơn [5,16] -> Nhóm 1 xếp trên.
+        sorted_rank_list = sorted(inf['ranks'])
+        final_std.append((g, -inf['wins'], sum(inf['ranks']), sorted_rank_list))
     
-    # Dự đoán
+    # Key sắp xếp:
+    # 1. -Wins (Nhỏ hơn = Nhiều win hơn)
+    # 2. Sum Rank (Nhỏ hơn = Tổng hạng thấp hơn)
+    # 3. Sorted Rank List (List nào có phần tử đầu nhỏ hơn sẽ đứng trước -> Có rank tốt hơn đứng trước)
+    # 4. Tên (0x < 1x)
+    final_std.sort(key=lambda x: (x[1], x[2], x[3], x[0])) 
+    
+    top6_std = [x[0] for x in final_std[:6]]
+    
+    best_mod_grp = sorted(stats_mod.keys(), key=lambda g: (-stats_mod[g]['wins'], g))[0]
+    
+    # --- DỰ ĐOÁN ---
     hist_series = df[col_hist_used].astype(str).apply(lambda x: re.sub(r'[^0-9X]', '', x.upper().replace('S','6')))
     
     def get_group_set(group_name, score_map, limit):
@@ -380,26 +368,19 @@ def calculate_v24_final(target_date, rolling_window, cache, kq_db, limits_config
 
 # --- UI ---
 if uploaded_files:
-    # Load dữ liệu và lấy thông tin debug
     data_cache, kq_db, f_status, err_logs = load_data_v24(uploaded_files)
     
-    # HIỂN THỊ DEBUG (Để bạn biết file nào vào, file nào không)
-    with st.expander("🕵️ Debug: Chi tiết file đã tải lên (Bấm để xem)", expanded=False):
+    with st.expander("🕵️ Debug: Trạng thái File", expanded=False):
         for s in f_status:
             if "❌" in s or "⚠️" in s: st.error(s)
             else: st.success(s)
-        if err_logs:
-            st.error("Chi tiết lỗi kỹ thuật:")
-            for e in err_logs: st.write(e)
     
     if data_cache:
         limit_cfg = {'l12': L_TOP_12, 'l34': L_TOP_34, 'l56': L_TOP_56, 'mod': LIMIT_MODIFIED}
         last_d = max(data_cache.keys())
         
-        # --- TAB CHUYỂN ĐỔI ---
-        tab1, tab2 = st.tabs(["📊 DỰ ĐOÁN HÔM NAY", "🔙 BACKTEST QUÁ KHỨ"])
+        tab1, tab2 = st.tabs(["📊 DỰ ĐOÁN", "🔙 BACKTEST"])
         
-        # TAB 1: DỰ ĐOÁN
         with tab1:
             st.subheader("Dự đoán hàng ngày")
             target = st.date_input("📅 Ngày dự đoán:", value=last_d)
@@ -420,7 +401,7 @@ if uploaded_files:
                             st.text_area(f"Modified ({len(res['dan_mod'])} số):", ",".join(res['dan_mod']), height=150)
                         with c3:
                             st.subheader("3️⃣ FINAL")
-                            st.caption("Giao thoa (1) & (2)")
+                            st.caption("Giao thoa")
                             st.code(",".join(res['dan_final']), language="text")
                             st.metric("Số lượng", f"{len(res['dan_final'])} số")
                         
@@ -428,73 +409,43 @@ if uploaded_files:
                             real = kq_db[target]
                             st.markdown("---")
                             if real in res['dan_final']:
-                                st.balloons()
-                                st.success(f"🎉 CHÚC MỪNG! KQ **{real}** TRÚNG FINAL!")
+                                st.balloons(); st.success(f"🎉 KQ **{real}** WIN FINAL!")
                             else:
-                                st.error(f"❌ Kết quả **{real}** trượt Final.")
+                                st.error(f"❌ Kết quả **{real}** MISS.")
 
-        # TAB 2: BACKTEST
         with tab2:
-            st.subheader("Kiểm thử quá khứ (Backtest)")
-            
-            c_bt_1, c_bt_2 = st.columns(2)
-            with c_bt_1:
-                date_range = st.date_input("Chọn khoảng ngày test:", [last_d - timedelta(days=7), last_d])
-            with c_bt_2:
-                # TÙY CHỌN DÀN ĐỂ BACKTEST
-                bt_mode = st.radio("Chọn dàn để kiểm tra:", ["FINAL (Giao thoa)", "Dàn Gốc (Original)", "Dàn Modified"], horizontal=True)
+            st.subheader("Kiểm thử (Backtest)")
+            c1, c2 = st.columns(2)
+            with c1: date_range = st.date_input("Khoảng ngày:", [last_d - timedelta(days=7), last_d])
+            with c2: bt_mode = st.radio("Chế độ:", ["FINAL (Giao thoa)", "Dàn Gốc", "Dàn Mod"], horizontal=True)
 
             if st.button("🔄 CHẠY BACKTEST"):
-                if len(date_range) < 2:
-                    st.warning("Vui lòng chọn đủ Ngày bắt đầu và Ngày kết thúc.")
+                if len(date_range) < 2: st.warning("Chọn đủ ngày bắt đầu/kết thúc.")
                 else:
-                    start_date, end_date = date_range[0], date_range[1]
+                    start, end = date_range[0], date_range[1]
                     logs = []
+                    bar = st.progress(0)
+                    delta = (end - start).days + 1
                     
-                    progress_bar = st.progress(0)
-                    total_days = (end_date - start_date).days + 1
-                    
-                    for i in range(total_days):
-                        current_d = start_date + timedelta(days=i)
-                        progress_bar.progress((i + 1) / total_days)
-                        
-                        if current_d not in kq_db: continue # Chỉ test ngày có KQ
-                        
+                    for i in range(delta):
+                        d = start + timedelta(days=i)
+                        bar.progress((i+1)/delta)
+                        if d not in kq_db: continue
                         try:
-                            res, err = calculate_v24_final(current_d, ROLLING_WINDOW, data_cache, kq_db, limit_cfg)
+                            res, err = calculate_v24_final(d, ROLLING_WINDOW, data_cache, kq_db, limit_cfg)
                             if err: continue
                             
-                            real_val = kq_db[current_d]
+                            real = kq_db[d]
+                            t_set = res['dan_final'] if "FINAL" in bt_mode else (res['dan_goc'] if "Gốc" in bt_mode else res['dan_mod'])
                             
-                            if bt_mode == "FINAL (Giao thoa)":
-                                target_set = res['dan_final']
-                            elif bt_mode == "Dàn Gốc (Original)":
-                                target_set = res['dan_goc']
-                            else:
-                                target_set = res['dan_mod']
-                            
-                            is_win = real_val in target_set
-                            logs.append({
-                                "Ngày": current_d.strftime("%d/%m"),
-                                "KQ": real_val,
-                                "Trạng thái": "WIN 🎉" if is_win else "MISS ❌",
-                                "Số lượng": len(target_set),
-                                "Chi tiết số": ",".join(target_set) if len(target_set) < 20 else f"{len(target_set)} số (Bấm xem)"
-                            })
+                            is_win = real in t_set
+                            logs.append({"Ngày": d.strftime("%d/%m"), "KQ": real, "TT": "WIN" if is_win else "MISS", "Số": len(t_set), "Chi tiết": ",".join(t_set)})
                         except: pass
                     
-                    progress_bar.empty()
-                    
+                    bar.empty()
                     if logs:
-                        df_logs = pd.DataFrame(logs)
-                        wins = df_logs[df_logs["Trạng thái"].str.contains("WIN")].shape[0]
-                        total = df_logs.shape[0]
-                        rate = (wins/total)*100 if total > 0 else 0
-                        
-                        st.metric(f"Tỉ lệ trúng ({bt_mode})", f"{wins}/{total}", f"{rate:.1f}%")
-                        st.dataframe(df_logs, use_container_width=True)
-                    else:
-                        st.warning("Không có dữ liệu hoặc không tính toán được trong khoảng thời gian này.")
-
-    else:
-        st.error("Không đọc được dữ liệu nào hợp lệ. Vui lòng kiểm tra file.")
+                        df_log = pd.DataFrame(logs)
+                        wins = df_log[df_log["TT"]=="WIN"].shape[0]
+                        st.metric(f"Tỉ lệ Win ({bt_mode})", f"{wins}/{df_log.shape[0]}", f"{(wins/df_log.shape[0])*100:.1f}%")
+                        st.dataframe(df_log, use_container_width=True)
+                    else: st.warning("Không có dữ liệu.")
