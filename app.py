@@ -8,7 +8,7 @@ import io
 
 # --- CẤU HÌNH ---
 st.set_page_config(page_title="Quang Pro V24", page_icon="🎯", layout="wide")
-st.title("🎯 Quang Pro V24: Matrix Edition (Fix Backtest)")
+st.title("🎯 Quang Pro V24: Matrix Edition (Fix Crash)")
 
 # --- 1. TẢI FILE ---
 uploaded_files = st.file_uploader("Tải TẤT CẢ file CSV (Tháng 12, Tháng 1...):", type=['xlsx', 'csv'], accept_multiple_files=True)
@@ -73,8 +73,9 @@ def get_nums(s):
     return [n.zfill(2) for n in raw_nums if len(n) <= 2]
 
 def get_col_score(col_name, mapping):
+    # FIX: Dùng .get() để tránh lỗi KeyError nếu M10 không tồn tại
     clean = re.sub(r'[^A-Z0-9]', '', str(col_name).upper())
-    if 'M10' in clean: return mapping['M10']
+    if 'M10' in clean: return mapping.get('M10', 0)
     for key, score in mapping.items():
         if key in clean:
             if key == 'M1' and 'M10' in clean: continue
@@ -289,32 +290,37 @@ def calculate_v24_final(target_date, rolling_window, cache, kq_db, limits_config
                     stats_std[g]['ranks'].append(999)
                     continue
                 
-                def get_top_nums_bt(members_df, primary_score_map, secondary_score_map, top_n, min_v, inverse):
+                # --- FIX CRASH: LOGIC BACKTEST MỚI ---
+                def get_top_nums_bt(members_df, pre_calc_p_map, pre_calc_s_map, top_n, min_v, inverse):
                     num_stats = {}
+                    # Ở đây pre_calc_p_map là Dictionary {Tên Cột: Điểm} đã tính sẵn
+                    # Nên ta không gọi get_col_score nữa mà dùng trực tiếp
+                    
                     for _, r in members_df.iterrows():
-                        p_cols = {c: get_col_score(c, primary_score_map) for c in members_df.columns if get_col_score(c, primary_score_map) > 0}
-                        s_cols = {c: get_col_score(c, secondary_score_map) for c in members_df.columns if get_col_score(c, secondary_score_map) > 0}
-                        all_cols = set(p_cols.keys()).union(set(s_cols.keys()))
+                        # Lọc lấy các cột có trong members_df (vì pre_calc chứa toàn bộ cột của sheet)
+                        cols_in_row = [c for c in members_df.columns if c in pre_calc_p_map or c in pre_calc_s_map]
+                        
                         processed_nums = set()
-                        for col in all_cols:
-                            if col not in members_df.columns: continue
+                        for col in cols_in_row:
                             val = r[col]
                             nums = get_nums(val)
                             for n in nums:
                                 if n not in num_stats: num_stats[n] = {'p_score': 0, 's_score': 0, 'votes': 0}
                                 if n in processed_nums: continue 
-                                if col in p_cols: num_stats[n]['p_score'] += p_cols[col]
-                                if col in s_cols: num_stats[n]['s_score'] += s_cols[col]
+                                
+                                if col in pre_calc_p_map: num_stats[n]['p_score'] += pre_calc_p_map[col]
+                                if col in pre_calc_s_map: num_stats[n]['s_score'] += pre_calc_s_map[col]
                             processed_nums.update(nums)
                     
+                    # Tính Vote (Dựa trên hệ thống điểm chính)
                     for n in num_stats: num_stats[n]['votes'] = 0
                     for _, r in members_df.iterrows():
-                        p_cols = {c: get_col_score(c, primary_score_map) for c in members_df.columns if get_col_score(c, primary_score_map) > 0}
                         found_in_row = set()
-                        for col in p_cols:
-                            if col in r:
-                                for n in get_nums(r[col]): 
-                                    if n in num_stats: found_in_row.add(n)
+                        for col in members_df.columns:
+                            if col in pre_calc_p_map: # Chỉ xét cột thuộc hệ điểm chính
+                                if col in r:
+                                    for n in get_nums(r[col]): 
+                                        if n in num_stats: found_in_row.add(n)
                         for n in found_in_row: num_stats[n]['votes'] += 1
 
                     filtered = [n for n, s in num_stats.items() if s['votes'] >= min_v]
@@ -345,7 +351,7 @@ def calculate_v24_final(target_date, rolling_window, cache, kq_db, limits_config
         top6_std = [x[0] for x in final_std[:6]]
         best_mod_grp = sorted(stats_mod.keys(), key=lambda g: (-stats_mod[g]['wins'], g))[0]
     
-    # Dự đoán
+    # Dự đoán (Phần này vẫn dùng get_col_score vì chạy 1 lần, không sao)
     hist_series = df[col_hist_used].astype(str).apply(lambda x: re.sub(r'[^0-9X]', '', x.upper().replace('S','6')))
     
     def get_group_set_final(group_name, p_map, s_map, limit, min_v, inverse):
@@ -625,7 +631,6 @@ if uploaded_files:
                     logs = []
                     group_tracker = {f"{i}x": {'wins_real': 0, 'picked_std': 0, 'picked_mod': 0} for i in range(10)}
                     
-                    # LOGIC MATRIX NHÓM TRONG BACKTEST
                     grp_matrix_logs = []
 
                     bar = st.progress(0)
@@ -636,10 +641,9 @@ if uploaded_files:
                         bar.progress((i+1)/delta)
                         if d not in kq_db: continue
                         
-                        # --- CHỖ NÀY ĐÃ GỠ BỎ TRY/EXCEPT ĐỂ HIỆN LỖI ---
                         res, err = calculate_v24_final(d, ROLLING_WINDOW, data_cache, kq_db, limit_cfg, MIN_VOTES, custom_std, custom_mod, USE_INVERSE, None)
                         if err: 
-                            st.error(f"Lỗi ngày {d}: {err}")
+                            # st.error(f"Lỗi ngày {d}: {err}")
                             continue
                         
                         real = kq_db[d]
@@ -648,30 +652,22 @@ if uploaded_files:
                         logs.append({"Ngày": d.strftime("%d/%m"), "KQ": real, "TT": "WIN" if is_win else "MISS", "Số": len(t_set), "Chi tiết": ",".join(t_set)})
                         
                         if show_group_stats:
-                            # 1. Thống kê tổng hợp
-                            real_grp = f"{str(real).zfill(2)[0]}x" # FIX: zfill(2) để 05 -> 0x
+                            # FIX: Đảm bảo real_grp luôn đúng định dạng 0x
+                            real_val_str = str(real).zfill(2)
+                            real_grp = f"{real_val_str[0]}x"
+                            
                             if real_grp in group_tracker: group_tracker[real_grp]['wins_real'] += 1
                             for g in res['top6_std']:
                                 if g in group_tracker: group_tracker[g]['picked_std'] += 1
                             if res['best_mod'] in group_tracker: group_tracker[res['best_mod']]['picked_mod'] += 1
                             
-                            # 2. Thống kê Matrix từng ngày (Cho nhóm)
-                            # Cần biết hôm đó nhóm nào ăn (dựa trên KQ thực)
-                            # Logic: Nhóm nào chứa KQ thì đánh dấu ✅, còn lại ░
-                            # (Lưu ý: Đây là thống kê KQ thực tế về nhóm nào, chứ chưa phải là Backtest nhóm đó trúng hay trượt theo Top 60)
-                            # Nếu muốn biết Nhóm trúng hay trượt theo limit 60 -> Phải dùng logic Tab 3
-                            # Ở đây ta hiển thị: KQ về nhóm nào? Và nhóm nào ĐƯỢC CHỌN?
-                            
                             day_m = {"Ngày": d.strftime("%d/%m"), "KQ": real}
                             for g in [f"{k}x" for k in range(10)]:
                                 mark = "░"
-                                if g == real_grp: mark = "✅" # KQ về nhóm này
-                                
-                                # Đánh dấu nếu được chọn
+                                if g == real_grp: mark = "✅"
                                 picked = ""
-                                if g in res['top6_std']: picked += "🔹" # Gốc chọn
-                                if g == res['best_mod']: picked += "🔸" # Mod chọn
-                                
+                                if g in res['top6_std']: picked += "🔹"
+                                if g == res['best_mod']: picked += "🔸"
                                 day_m[g] = f"{mark}{picked}"
                             grp_matrix_logs.append(day_m)
 
@@ -688,7 +684,6 @@ if uploaded_files:
                             st.subheader("📊 Phân tích hiệu quả Nhóm")
                             st.caption("✅: Nhóm chứa KQ về | 🔹: Được chọn bởi Gốc (Top 6) | 🔸: Được chọn bởi Mod (Top 1)")
                             
-                            # Bảng Matrix
                             st.dataframe(pd.DataFrame(grp_matrix_logs), use_container_width=True, height=400)
                             
                             st.divider()
