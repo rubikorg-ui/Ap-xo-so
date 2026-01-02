@@ -122,3 +122,178 @@ def load_data_v15(files):
                             
                     # Tìm KQ
                     kq_row = None
+                    for idx, row in df.iterrows():
+                        if str(row.values[0]).strip().upper() == "KQ":
+                            kq_row = row; break
+                    
+                    if kq_row is not None:
+                        for col_name, d_val in col_map.items():
+                            val = str(kq_row[col_name])
+                            nums = get_nums(val)
+                            if nums: kq_db[d_val] = nums[0]
+                    
+                    if found_dates:
+                        # Lưu cache (lấy ngày lớn nhất trong sheet làm đại diện)
+                        max_d = max(found_dates)
+                        data_cache[max_d] = {'df': df, 'map': col_map}
+                        
+                except: continue
+        except: continue
+        
+    return data_cache, kq_db, logs
+
+def calculate_v15(target_date, rolling_window, data_cache, kq_db):
+    # Tìm dữ liệu phù hợp (Sheet chứa ngày target hoặc tương lai gần nhất)
+    sel_data = None
+    if target_date in data_cache: sel_data = data_cache[target_date]
+    else:
+        futures = [d for d in data_cache.keys() if d >= target_date]
+        if futures: sel_data = data_cache[min(futures)]
+        
+    if not sel_data: return [], [], None
+    
+    df = sel_data['df']
+    col_map = sel_data['map']
+    date_to_col = {v: k for k, v in col_map.items()}
+    
+    # 1. Tìm Top 6 Group
+    past_dates = [target_date - timedelta(days=i) for i in range(1, rolling_window + 1)]
+    past_dates.reverse()
+    
+    groups = [f"{i}x" for i in range(10)]
+    stats = {g: {'wins': 0, 'ranks': []} for g in groups}
+    
+    # Xác định các cột điểm
+    valid_cols_score = {}
+    for c in df.columns:
+        s = get_col_score(c)
+        if s > 0: valid_cols_score[c] = s
+
+    for d in past_dates:
+        if d not in kq_db or d not in date_to_col: continue
+        
+        col_name = date_to_col[d]
+        kq = kq_db[d]
+        
+        for g in groups:
+            # Lọc thành viên
+            mask = df[col_name].astype(str).apply(lambda x: re.sub(r'[^0-9X]', '', x.upper())) == g.upper()
+            members = df[mask]
+            
+            if members.empty:
+                stats[g]['ranks'].append(999); continue
+                
+            total_scores = Counter()
+            for _, row in members.iterrows():
+                for sc_col, score in valid_cols_score.items():
+                    for n in get_nums(row[sc_col]): total_scores[n] += score
+            
+            rank_n = [n for n, s in total_scores.most_common()]
+            rank_n.sort(key=lambda x: (-total_scores[x], int(x)))
+            
+            top80 = rank_n[:80]
+            if kq in top80:
+                stats[g]['wins'] += 1
+                stats[g]['ranks'].append(top80.index(kq) + 1)
+            else: stats[g]['ranks'].append(999)
+
+    final_ranks = []
+    for g, info in stats.items():
+        final_ranks.append((g, -info['wins'], sum(info['ranks'])))
+    final_ranks.sort(key=lambda x: (x[1], x[2]))
+    top6 = [x[0] for x in final_ranks[:6]]
+    
+    # 2. Dự đoán
+    prev_date = target_date - timedelta(days=1)
+    res = []
+    col_used = None
+    
+    if prev_date in date_to_col:
+        col_used = date_to_col[prev_date]
+        def get_pool(grp_list):
+            pool = []
+            for g in grp_list:
+                mask = df[col_used].astype(str).apply(lambda x: re.sub(r'[^0-9X]', '', x.upper())) == g.upper()
+                mems = df[mask]
+                scores = Counter()
+                for _, row in mems.iterrows():
+                    for sc_col, score in valid_cols_score.items():
+                        for n in get_nums(row[sc_col]): scores[n] += score
+                r_n = [n for n, s in scores.most_common()]
+                r_n.sort(key=lambda x: (-scores[x], int(x)))
+                
+                limit = 80
+                if g in [top6[2], top6[3]]: limit = 65
+                if g in [top6[4], top6[5]]: limit = 60
+                pool.extend(r_n[:limit])
+            return pool
+
+        s1 = set(get_pool([top6[0], top6[5], top6[3]]))
+        s2 = set(get_pool([top6[1], top6[4], top6[2]]))
+        res = sorted(list(s1.intersection(s2)))
+        
+    return top6, res, col_used
+
+# --- GIAO DIỆN CHÍNH ---
+if uploaded_files:
+    with st.spinner("Đang soi dữ liệu..."):
+        data_cache, kq_db, logs = load_data_v15(uploaded_files)
+    
+    # KHU VỰC HIỂN THỊ TRẠNG THÁI (LUÔN HIỆN)
+    with st.expander("🧐 TRẠNG THÁI ĐỌC FILE (Quan trọng)", expanded=True):
+        if not data_cache:
+            st.error("❌ Không đọc được ngày nào! Hãy kiểm tra lại file.")
+            for l in logs: st.text(l)
+        else:
+            st.success(f"✅ Đã đọc {len(data_cache)} ngày.")
+            st.caption("Các ngày có Kết quả:")
+            # Show KQ để user kiểm tra
+            kq_list = [{"Ngày": k, "KQ": v} for k, v in kq_db.items()]
+            if kq_list:
+                st.dataframe(pd.DataFrame(kq_list).sort_values("Ngày"), height=150)
+            else:
+                st.warning("Đọc được ngày nhưng chưa tìm thấy dòng 'KQ'.")
+
+    # KHU VỰC NÚT BẤM (LUÔN HIỆN NẾU CÓ DỮ LIỆU)
+    if data_cache:
+        st.write("---")
+        tab1, tab2 = st.tabs(["🔮 DỰ ĐOÁN", "️u001f3c5 BACKTEST"])
+        
+        with tab1:
+            # Tự động chọn ngày tiếp theo của ngày cuối cùng có dữ liệu
+            last_d = max(data_cache.keys())
+            target = st.date_input("Chọn ngày dự đoán:", value=last_d + timedelta(days=1))
+            
+            if st.button("🚀 PHÂN TÍCH NGAY", type="primary", use_container_width=True):
+                top6, res, col = calculate_v15(target, ROLLING_WINDOW, data_cache, kq_db)
+                
+                if not col:
+                    st.error(f"❌ Không thể dự đoán! Lý do: Không tìm thấy dữ liệu của ngày hôm trước ({target - timedelta(days=1)}) trong file.")
+                else:
+                    st.success(f"Dữ liệu lấy từ cột: {col}")
+                    st.info(f"🏆 TOP 6: {', '.join(top6)}")
+                    st.text_area("KẾT QUẢ:", ",".join(res))
+        
+        with tab2:
+            st.write("Chạy kiểm chứng quá khứ:")
+            c1, c2 = st.columns(2)
+            with c1: start = st.date_input("Từ:", value=last_d - timedelta(days=5))
+            with c2: end = st.date_input("Đến:", value=last_d)
+            
+            if st.button("⚡ CHẠY BACKTEST", use_container_width=True):
+                delta = (end - start).days
+                logs = []
+                bar = st.progress(0)
+                for i in range(delta + 1):
+                    d = start + timedelta(days=i)
+                    bar.progress((i+1)/(delta+1))
+                    try:
+                        _, res, _ = calculate_v15(d, ROLLING_WINDOW, data_cache, kq_db)
+                        real = kq_db.get(d, "N/A")
+                        stt = "WIN" if real in res else "LOSS"
+                        if real == "N/A": stt = "-"
+                        logs.append({"Ngày": d.strftime("%d/%m"), "KQ": real, "TT": stt, "Số lượng": len(res)})
+                    except: pass
+                bar.empty()
+                st.dataframe(pd.DataFrame(logs), use_container_width=True)
+
