@@ -138,4 +138,217 @@ def load_data_v12(files):
                                     # Nhưng với định dạng ngày tháng (có dấu / hoặc -) thì khá an toàn
                                     try:
                                         val = str(kq_row[col])
-                                        nums = get_nums
+                                        nums = get_nums(val)
+                                        if nums: 
+                                            found_val = nums[0]
+                                            found_col_name = col
+                                    except: pass
+                            if found_val: break
+                            
+                        if found_val: 
+                            kq_db[current_date] = found_val
+                            # Log kiểm tra cho ngày đầu tháng (dễ lỗi nhất)
+                            if d <= 3:
+                                debug_logs.append(f"✅ Ngày {current_date}: Lấy được KQ '{found_val}' từ cột '{found_col_name}'")
+
+                except Exception as e: continue
+        except: continue
+            
+    return data_cache, kq_db, debug_logs
+
+def get_group_top_n_stable(df, group_name, grp_col, limit=80):
+    # Lọc Group (0x, 1x...)
+    # Cần clean_text nhẹ nhàng
+    target = str(group_name).upper()
+    try:
+        # Tìm cột 9x, 8x... để lọc
+        filter_col = None
+        for c in df.columns:
+            if "THÀNH VIÊN" in str(c).upper() and "9X" not in str(c).upper(): # Cột tên
+                pass
+            if target in str(df[c].astype(str).head().values).upper(): # Cách tìm cột chứa nhóm
+                # Cách đơn giản hơn: Tìm cột có tên khớp pattern
+                pass
+                
+        # Logic cũ ổn định hơn cho việc lọc hàng
+        # Ta dùng lại logic tìm cột chứa nhóm
+        mask = df.iloc[:, 0].astype(str).str.contains(".*", na=False) # Placeholder
+        
+        # Tìm cột định danh nhóm (Thường là cột TV TOP 9X0X hoặc tương tự)
+        # Trong file user: Cột đầu tiên chứa tên Group? Không, cột đầu chứa tên user
+        # Cột quy định nhóm (1x, 2x...) nằm ngay trong dữ liệu.
+        
+        # [FIX] Logic lấy Top:
+        # Duyệt qua từng dòng, xem cột Group (ví dụ cột '9X') có phải là group_name không
+        # Nhưng code cũ dùng 'grp_col' là cột NGÀY HÔM TRƯỚC.
+        # Ý nghĩa: Lấy những người mà NGÀY HÔM TRƯỚC thuộc nhóm group_name (VD: 0x)
+        
+        col_vals = df[grp_col].astype(str).apply(lambda x: re.sub(r'[^0-9X]', '', x.upper()))
+        members = df[col_vals == target.upper()]
+        
+    except: return []
+    if members.empty: return []
+
+    # Tính điểm
+    total_scores = Counter()
+    
+    # Chỉ xét các cột M0...M10
+    valid_cols = []
+    col_scores = {}
+    for c in df.columns:
+        s = get_col_score(c)
+        if s > 0:
+            col_scores[c] = s
+            valid_cols.append(c)
+            
+    # Cộng điểm
+    for idx, row in members.iterrows():
+        for col in valid_cols:
+            val = str(row[col])
+            score = col_scores[col]
+            nums = get_nums(val)
+            for n in nums:
+                total_scores[n] += score
+                
+    all_nums = list(total_scores.keys())
+    # Sort: Điểm cao -> Số nhỏ
+    all_nums.sort(key=lambda n: (-total_scores[n], int(n)))
+    return all_nums[:limit]
+
+def calculate_by_date(target_date, rolling_window, data_cache, kq_db):
+    past_dates = []
+    for i in range(1, rolling_window + 1):
+        past_dates.append(target_date - timedelta(days=i))
+    past_dates.reverse()
+    
+    groups = [f"{i}x" for i in range(10)]
+    stats = {g: {'wins': 0, 'ranks': []} for g in groups}
+    
+    for d_obj in past_dates:
+        if d_obj not in data_cache or d_obj not in kq_db: continue
+        
+        df = data_cache[d_obj]
+        prev_date = d_obj - timedelta(days=1)
+        
+        # Tìm cột dữ liệu của ngày hôm trước (để phân nhóm)
+        # Cột này chứa: 0x, 1x...
+        d, m, y = prev_date.day, prev_date.month, prev_date.year
+        patterns = [
+            f"{d}/{m}", f"{d:02d}/{m}", str(d),
+            f"{y}-{m:02d}-{d:02d}", f"{y}-{m}-{d}"
+        ]
+        
+        grp_col = None
+        for c in df.columns:
+            for p in patterns:
+                if p in str(c).upper(): 
+                    grp_col = c; break
+            if grp_col: break
+            
+        if not grp_col: continue
+        
+        kq = kq_db[d_obj]
+        for g in groups:
+            top80_list = get_group_top_n_stable(df, g, grp_col, limit=80)
+            if kq in top80_list:
+                stats[g]['wins'] += 1
+                stats[g]['ranks'].append(top80_list.index(kq) + 1)
+            else: stats[g]['ranks'].append(999)
+
+    ranked_items = []
+    for g in sorted(stats.keys()):
+        data = stats[g]
+        ranked_items.append((g, (-data['wins'], sum(data['ranks']), sorted(data['ranks']), g)))
+    ranked_items.sort(key=lambda x: x[1])
+    top6 = [item[0] for item in ranked_items[:6]]
+    
+    final_result = []
+    if target_date in data_cache:
+        df_target = data_cache[target_date]
+        prev_date = target_date - timedelta(days=1)
+        d, m, y = prev_date.day, prev_date.month, prev_date.year
+        patterns = [f"{d}/{m}", f"{d:02d}/{m}", str(d), f"{y}-{m:02d}-{d:02d}"]
+        
+        grp_col_target = None
+        for c in df_target.columns:
+            for p in patterns:
+                if p in str(c).upper(): 
+                    grp_col_target = c; break
+            if grp_col_target: break
+            
+        if grp_col_target:
+            limit_map = {top6[0]: 80, top6[1]: 80, top6[2]: 65, top6[3]: 65, top6[4]: 60, top6[5]: 60}
+            alliance_1 = [top6[0], top6[5], top6[3]]
+            alliance_2 = [top6[1], top6[4], top6[2]]
+            def process_alliance(alist, df, col, l_map):
+                sets = []
+                for g in alist:
+                    lst = get_group_top_n_stable(df, g, col, limit=l_map.get(g, 80))
+                    sets.append(set(lst)) 
+                all_n = []
+                for s in sets: all_n.extend(sorted(list(s)))
+                return {n for n, c in Counter(all_n).items() if c >= 2}
+            set_1 = process_alliance(alliance_1, df_target, grp_col_target, limit_map)
+            set_2 = process_alliance(alliance_2, df_target, grp_col_target, limit_map)
+            final_result = sorted(list(set_1.intersection(set_2)))
+            return top6, final_result, grp_col_target
+    return top6, final_result, None
+
+# --- MAIN ---
+if uploaded_files:
+    with st.spinner("⏳ Đang soi kỹ từng cột trong file..."):
+        data_cache, kq_db, debug_logs = load_data_v12(uploaded_files)
+    
+    with st.expander("🔍 KIỂM TRA DỮ LIỆU ĐÃ ĐỌC (Quan trọng!)", expanded=True):
+        if not data_cache:
+            st.error("❌ Không đọc được ngày nào!")
+        else:
+            st.success(f"✅ Đã đọc thành công {len(data_cache)} ngày.")
+            st.write("Nhật ký đọc các ngày đầu tháng (để kiểm tra cột 2026-01-01):")
+            for log in debug_logs: st.text(log)
+
+    if data_cache:
+        tab1, tab2 = st.tabs(["🎯 DỰ ĐOÁN", "🛠️ BACKTEST"])
+        
+        with tab1:
+            st.write("### Chọn ngày:")
+            default_date = max(data_cache.keys()) if data_cache else datetime.date.today()
+            selected_date = st.date_input("Ngày:", value=default_date)
+            
+            if st.button("🚀 DỰ ĐOÁN NGAY", use_container_width=True):
+                top6, result, found_col = calculate_by_date(selected_date, ROLLING_WINDOW, data_cache, kq_db)
+                
+                if not found_col:
+                    st.warning(f"⚠️ Không tìm thấy cột dữ liệu của ngày hôm trước ({selected_date - timedelta(days=1)}) để dựa vào đó dự đoán.")
+                    st.caption("Gợi ý: Kiểm tra xem trong Sheet của ngày dự đoán có cột ngày hôm trước không.")
+                else:
+                    st.info(f"Dữ liệu dựa trên cột: **{found_col}**")
+                    st.success(f"🏆 TOP 6 GROUP: {', '.join(top6)}")
+                    st.code(",".join(result), language="text")
+                    if selected_date in kq_db:
+                        st.write(f"Kết quả thực tế ngày này: **{kq_db[selected_date]}**")
+
+        with tab2:
+            st.write("### Backtest:")
+            c1, c2 = st.columns(2)
+            with c1: d_start = st.date_input("Từ:", value=default_date - timedelta(days=5))
+            with c2: d_end = st.date_input("Đến:", value=default_date)
+            
+            if st.button("⚡ CHẠY", use_container_width=True):
+                delta = d_end - d_start
+                days_list = [d_start + timedelta(days=i) for i in range(delta.days + 1)]
+                logs = []
+                bar = st.progress(0)
+                for i, d in enumerate(days_list):
+                    bar.progress((i+1)/len(days_list))
+                    if d not in data_cache: continue
+                    try:
+                        _, res, _ = calculate_by_date(d, ROLLING_WINDOW, data_cache, kq_db)
+                        act = kq_db.get(d, "N/A")
+                        stt = "WIN ✅" if act in res else "LOSS ❌"
+                        if act == "N/A": stt = "Waiting"
+                        logs.append({"Ngày": d.strftime('%d/%m'), "KQ": act, "TT": stt, "Số lượng": len(res)})
+                    except: pass
+                bar.empty()
+                if logs: st.dataframe(pd.DataFrame(logs), use_container_width=True)
+                else: st.warning("Không có dữ liệu.")
