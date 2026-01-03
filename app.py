@@ -9,7 +9,7 @@ from functools import lru_cache
 
 # --- CẤU HÌNH ---
 st.set_page_config(page_title="Quang Pro V24", page_icon="🎯", layout="wide")
-st.title("🎯 Quang Pro V24: Matrix Edition (Optimized)")
+st.title("🎯 Quang Handsome: Matrix Edition (Optimized)")
 
 # --- 1. TẢI FILE ---
 uploaded_files = st.file_uploader("Tải TẤT CẢ file CSV (Tháng 12, Tháng 1...):", type=['xlsx', 'csv'], accept_multiple_files=True)
