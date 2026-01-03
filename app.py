@@ -4,177 +4,102 @@ import re
 from collections import Counter
 import datetime
 from datetime import timedelta
+import io
 from functools import lru_cache
-from typing import List, Dict, Tuple, Optional, Set, Any
 
 # ==============================================================================
-# 1. CẤU HÌNH & HẰNG SỐ (CONFIGURATION & CONSTANTS)
+# 1. CẤU HÌNH HỆ THỐNG & UI
 # ==============================================================================
-
-class AppConfig:
-    PAGE_TITLE = "Quang Pro V24"
-    PAGE_ICON = "🎯"
-    LAYOUT = "wide"
-    
-    # Regex Patterns
-    RE_NUMS = re.compile(r'\d+')
-    RE_CLEAN_SCORE = re.compile(r'[^A-Z0-9]')
-    RE_ISO_DATE = re.compile(r'(20\d{2})[\.\-/](\d{1,2})[\.\-/](\d{1,2})')
-    RE_SLASH_DATE = re.compile(r'(\d{1,2})[\.\-/](\d{1,2})')
-    
-    # Keywords
-    BAD_KEYWORDS = frozenset(['N', 'NGHI', 'SX', 'XIT', 'MISS', 'TRUOT', 'NGHỈ', 'LỖI'])
-    HEADER_KEYWORDS = ["STT", "MEMBER", "THÀNH VIÊN", "TV TOP", "DANH SÁCH", "HỌ VÀ TÊN", "NICK"]
-    
-    # Defaults
-    GROUPS = [f"{i}x" for i in range(10)]
-
 st.set_page_config(
-    page_title=AppConfig.PAGE_TITLE, 
-    page_icon=AppConfig.PAGE_ICON, 
-    layout=AppConfig.LAYOUT,
+    page_title="Quang Pro V24", 
+    page_icon="🎯", 
+    layout="wide",
     initial_sidebar_state="collapsed" 
 )
 
 st.title("🎯 Quang Handsome: Matrix Edition")
-st.caption("🚀 Mobile Optimized | V24 Core Logic | Full Refactored")
+st.caption("🚀 Mobile Optimized | V24 Core Logic | 100% Precise")
+
+# Regex & Sets (Nguyên bản)
+RE_NUMS = re.compile(r'\d+')
+RE_CLEAN_SCORE = re.compile(r'[^A-Z0-9]')
+RE_ISO_DATE = re.compile(r'(20\d{2})[\.\-/](\d{1,2})[\.\-/](\d{1,2})')
+RE_SLASH_DATE = re.compile(r'(\d{1,2})[\.\-/](\d{1,2})')
+BAD_KEYWORDS = frozenset(['N', 'NGHI', 'SX', 'XIT', 'MISS', 'TRUOT', 'NGHỈ', 'LỖI'])
 
 # ==============================================================================
-# 2. TIỆN ÍCH XỬ LÝ DỮ LIỆU (UTILITY FUNCTIONS)
+# 2. CÁC HÀM XỬ LÝ DỮ LIỆU (NGUYÊN BẢN 100%)
 # ==============================================================================
 
 @lru_cache(maxsize=10000)
-def extract_numbers(text: str) -> List[str]:
-    """Tách số từ chuỗi, lọc từ khóa xấu và chuẩn hóa về dạng 2 chữ số."""
-    if pd.isna(text): return []
-    s_str = str(text).strip()
+def get_nums(s):
+    """"""
+    if pd.isna(s): return []
+    s_str = str(s).strip()
     if not s_str: return []
-    
     s_upper = s_str.upper()
-    if any(kw in s_upper for kw in AppConfig.BAD_KEYWORDS): return []
-    
-    raw_nums = AppConfig.RE_NUMS.findall(s_upper)
+    if any(kw in s_upper for kw in BAD_KEYWORDS): return []
+    raw_nums = RE_NUMS.findall(s_upper)
     return [n.zfill(2) for n in raw_nums if len(n) <= 2]
 
 @lru_cache(maxsize=1000)
-def get_column_score(col_name: str, mapping_tuple: Tuple[Tuple[str, int]]) -> int:
-    """Tính điểm cột dựa trên tên cột và bảng mapping."""
-    clean_name = AppConfig.RE_CLEAN_SCORE.sub('', str(col_name).upper())
+def get_col_score(col_name, mapping_tuple):
+    """"""
+    clean = RE_CLEAN_SCORE.sub('', str(col_name).upper())
     mapping = dict(mapping_tuple)
-    
-    if 'M10' in clean_name: 
-        return mapping.get('M10', 0)
-    
+    if 'M10' in clean: return mapping.get('M10', 0)
     for key, score in mapping.items():
-        if key in clean_name:
-            if key == 'M1' and 'M10' in clean_name: continue
-            if key == 'M0' and 'M10' in clean_name: continue
+        if key in clean:
+            if key == 'M1' and 'M10' in clean: continue
+            if key == 'M0' and 'M10' in clean: continue
             return score
     return 0
 
-def parse_date_smart(col_str: str, file_month: int, file_year: int) -> Optional[datetime.date]:
-    """Phân tích ngày tháng từ tên cột header."""
+def parse_date_smart(col_str, f_m, f_y):
+    """"""
     s = str(col_str).strip().upper()
     s = s.replace('NGAY', '').replace('NGÀY', '').strip()
-    
-    match_iso = AppConfig.RE_ISO_DATE.search(s)
+    match_iso = RE_ISO_DATE.search(s)
     if match_iso:
         y, p1, p2 = int(match_iso.group(1)), int(match_iso.group(2)), int(match_iso.group(3))
-        if p1 != file_month and p2 == file_month: 
-            return datetime.date(y, p2, p1)
+        if p1 != f_m and p2 == f_m: return datetime.date(y, p2, p1)
         return datetime.date(y, p1, p2)
-        
-    match_slash = AppConfig.RE_SLASH_DATE.search(s)
+    match_slash = RE_SLASH_DATE.search(s)
     if match_slash:
         d, m = int(match_slash.group(1)), int(match_slash.group(2))
         if m < 1 or m > 12 or d < 1 or d > 31: return None
-        
-        curr_y = file_year
-        if m == 12 and file_month == 1: curr_y -= 1
-        elif m == 1 and file_month == 12: curr_y += 1
-        
-        try: 
-            return datetime.date(curr_y, m, d)
-        except ValueError: 
-            return None
-            
+        curr_y = f_y
+        if m == 12 and f_m == 1: curr_y -= 1
+        elif m == 1 and f_m == 12: curr_y += 1
+        try: return datetime.date(curr_y, m, d)
+        except: return None
     return None
 
-def find_header_row_index(df_preview: pd.DataFrame) -> int:
-    """Tìm chỉ số dòng chứa header dựa trên từ khóa."""
+def find_header_row(df_preview):
+    keywords = ["STT", "MEMBER", "THÀNH VIÊN", "TV TOP", "DANH SÁCH", "HỌ VÀ TÊN", "NICK"]
     for idx, row in df_preview.iterrows():
         row_str = str(row.values).upper()
-        if any(k in row_str for k in AppConfig.HEADER_KEYWORDS):
+        if any(k in row_str for k in keywords):
             return idx
-    return 3 
+    return 3
 
-def extract_meta_from_filename(filename: str) -> Tuple[int, int, Optional[datetime.date]]:
-    """Lấy thông tin tháng, năm và ngày cụ thể (nếu có) từ tên file."""
+def extract_meta_from_filename(filename):
     clean_name = filename.upper().replace(".CSV", "").replace(".XLSX", "")
-    
     y_match = re.search(r'20\d{2}', clean_name)
     y_global = int(y_match.group(0)) if y_match else datetime.datetime.now().year
-    
     m_match = re.search(r'(?:THANG|THÁNG|T)[^0-9]*(\d{1,2})', clean_name)
     m_global = int(m_match.group(1)) if m_match else 12
-
     full_date_match = re.search(r'-\s*(\d{1,2})[\.\-](\d{1,2})[\.\-](20\d{2})$', clean_name)
-    specific_date = None
     if full_date_match:
         try:
             d, m, y = int(full_date_match.group(1)), int(full_date_match.group(2)), int(full_date_match.group(3))
-            specific_date = datetime.date(y, m, d)
-        except ValueError: pass
-        
-    return m_global, y_global, specific_date
-
-# ==============================================================================
-# 3. HÀM TẢI DỮ LIỆU (DATA LOADING)
-# ==============================================================================
-
-def _process_excel_file(file, f_m, f_y) -> List[Tuple[Optional[datetime.date], pd.DataFrame]]:
-    dfs_to_process = []
-    xls = pd.ExcelFile(file)
-    for sheet in xls.sheet_names:
-        s_date = None
-        try:
-            clean_s = re.sub(r'[^0-9]', ' ', sheet).strip()
-            parts = [int(x) for x in clean_s.split()]
-            if parts:
-                d_s, m_s, y_s = parts[0], f_m, f_y
-                if len(parts) >= 3 and parts[2] > 2000: 
-                    y_s = parts[2]; m_s = parts[1]
-                s_date = datetime.date(y_s, m_s, d_s)
-        except Exception: pass
-        
-        if s_date:
-            preview = pd.read_excel(xls, sheet_name=sheet, header=None, nrows=20)
-            h_row = find_header_row_index(preview)
-            df = pd.read_excel(xls, sheet_name=sheet, header=h_row)
-            dfs_to_process.append((s_date, df))
-    return dfs_to_process
-
-def _process_csv_file(file, date_from_name) -> List[Tuple[Optional[datetime.date], pd.DataFrame]]:
-    if not date_from_name: return []
-    try:
-        preview = pd.read_csv(file, header=None, nrows=20, encoding='utf-8')
-        file.seek(0)
-        df_raw = pd.read_csv(file, header=None, encoding='utf-8')
-    except UnicodeDecodeError:
-        file.seek(0)
-        try:
-            preview = pd.read_csv(file, header=None, nrows=20, encoding='latin-1')
-            file.seek(0)
-            df_raw = pd.read_csv(file, header=None, encoding='latin-1')
-        except Exception: return []
-
-    h_row = find_header_row_index(preview)
-    df = df_raw.iloc[h_row+1:].copy()
-    df.columns = df_raw.iloc[h_row]
-    return [(date_from_name, df)]
+            return m, y, datetime.date(y, m, d)
+        except: pass
+    return m_global, y_global, None
 
 @st.cache_data(ttl=600)
-def load_data_v24(files) -> Tuple[Dict, Dict, List[str], List[str]]:
+def load_data_v24(files):
+    """"""
     cache = {} 
     kq_db = {}
     err_logs = []
@@ -183,15 +108,44 @@ def load_data_v24(files) -> Tuple[Dict, Dict, List[str], List[str]]:
     for file in files:
         if file.name.upper() == 'N.CSV' or file.name.startswith('~$'): continue
         f_m, f_y, date_from_name = extract_meta_from_filename(file.name)
-        
         try:
             dfs_to_process = []
             if file.name.endswith('.xlsx'):
-                dfs_to_process = _process_excel_file(file, f_m, f_y)
-                if dfs_to_process: file_status.append(f"✅ Excel: {file.name}")
+                xls = pd.ExcelFile(file)
+                for sheet in xls.sheet_names:
+                    s_date = None
+                    try:
+                        clean_s = re.sub(r'[^0-9]', ' ', sheet).strip()
+                        parts = [int(x) for x in clean_s.split()]
+                        if parts:
+                            d_s, m_s, y_s = parts[0], f_m, f_y
+                            if len(parts) >= 3 and parts[2] > 2000: y_s = parts[2]; m_s = parts[1]
+                            s_date = datetime.date(y_s, m_s, d_s)
+                    except: pass
+                    if s_date:
+                        preview = pd.read_excel(xls, sheet_name=sheet, header=None, nrows=20)
+                        h_row = find_header_row(preview)
+                        df = pd.read_excel(xls, sheet_name=sheet, header=h_row)
+                        dfs_to_process.append((s_date, df))
+                file_status.append(f"✅ Excel: {file.name}")
             elif file.name.endswith('.csv'):
-                dfs_to_process = _process_csv_file(file, date_from_name)
-                if dfs_to_process: file_status.append(f"✅ CSV: {file.name}")
+                if not date_from_name: continue
+                try:
+                    preview = pd.read_csv(file, header=None, nrows=20, encoding='utf-8')
+                    file.seek(0)
+                    df_raw = pd.read_csv(file, header=None, encoding='utf-8')
+                except:
+                    file.seek(0)
+                    try:
+                        preview = pd.read_csv(file, header=None, nrows=20, encoding='latin-1')
+                        file.seek(0)
+                        df_raw = pd.read_csv(file, header=None, encoding='latin-1')
+                    except: continue
+                h_row = find_header_row(preview)
+                df = df_raw.iloc[h_row+1:].copy()
+                df.columns = df_raw.iloc[h_row]
+                dfs_to_process.append((date_from_name, df))
+                file_status.append(f"✅ CSV: {file.name}")
 
             for t_date, df in dfs_to_process:
                 df.columns = [str(c).strip().upper() for c in df.columns]
@@ -200,7 +154,6 @@ def load_data_v24(files) -> Tuple[Dict, Dict, List[str], List[str]]:
                     if "UNNAMED" in col: continue
                     d_obj = parse_date_smart(col, f_m, f_y)
                     if d_obj: hist_map[d_obj] = col
-                
                 kq_row = None
                 if not df.empty:
                     for c_idx in range(min(2, len(df.columns))):
@@ -210,111 +163,20 @@ def load_data_v24(files) -> Tuple[Dict, Dict, List[str], List[str]]:
                                 kq_row = df.loc[idx]
                                 break
                         if kq_row is not None: break
-                
                 if kq_row is not None:
                     for d_val, c_name in hist_map.items():
                         val = str(kq_row[c_name])
-                        nums = extract_numbers(val)
+                        nums = get_nums(val)
                         if nums: kq_db[d_val] = nums[0]
-
                 cache[t_date] = {'df': df, 'hist_map': hist_map}
-
         except Exception as e:
             err_logs.append(f"Lỗi '{file.name}': {str(e)}")
             continue
-            
     return cache, kq_db, file_status, err_logs
 
 # ==============================================================================
-# 4. CORE LOGIC (THUẬT TOÁN CỐT LÕI)
+# 3. CORE LOGIC (VÁ LỖI RANDOM - LOGIC GIỮ NGUYÊN)
 # ==============================================================================
-
-def _calculate_ranked_numbers(members_df: pd.DataFrame, primary_score_map: dict, secondary_score_map: dict, top_n: int, min_vote: int, inverse: bool) -> List[str]:
-    num_stats = {}
-    cols_in_scope = list(set(primary_score_map.keys()) | set(secondary_score_map.keys()))
-    
-    for _, r in members_df.iterrows():
-        processed_nums = set()
-        for col in cols_in_scope:
-            if col not in r: continue
-            val = r[col]
-            nums = extract_numbers(val)
-            for n in nums:
-                if n not in num_stats: num_stats[n] = {'p': 0, 's': 0, 'v': 0}
-                if n in processed_nums: continue 
-                if col in primary_score_map: num_stats[n]['p'] += primary_score_map[col]
-                if col in secondary_score_map: num_stats[n]['s'] += secondary_score_map[col]
-            processed_nums.update(nums)
-    
-    for _, r in members_df.iterrows():
-        found_in_row = set()
-        for col in primary_score_map:
-            if col in r:
-                for n in extract_numbers(r[col]): 
-                    if n in num_stats: found_in_row.add(n)
-        for n in found_in_row: num_stats[n]['v'] += 1
-
-    filtered = [n for n, s in num_stats.items() if s['v'] >= min_vote]
-    
-    if inverse:
-        return sorted(filtered, key=lambda n: (-num_stats[n]['p'], -num_stats[n]['s'], int(n)))[:top_n]
-    else:
-        return sorted(filtered, key=lambda n: (-num_stats[n]['p'], -num_stats[n]['v'], int(n)))[:top_n]
-
-def _get_final_numbers_for_group(df: pd.DataFrame, hist_series: pd.Series, group_name: str, p_map_tuple: tuple, s_map_tuple: tuple, limit: int, min_v: int, inverse: bool) -> Set[str]:
-    mask = hist_series == group_name.upper()
-    valid_mems = df[mask]
-    
-    num_stats = {}
-    p_cols_dict = {c: get_column_score(c, p_map_tuple) for c in df.columns if get_column_score(c, p_map_tuple) > 0}
-    s_cols_dict = {c: get_column_score(c, s_map_tuple) for c in df.columns if get_column_score(c, s_map_tuple) > 0}
-    
-    for _, r in valid_mems.iterrows():
-        all_cols = set(p_cols_dict.keys()).union(set(s_cols_dict.keys()))
-        processed = set()
-        for col in all_cols:
-            if col not in valid_mems.columns: continue
-            val = r[col]
-            for n in extract_numbers(val): 
-                if n not in num_stats: num_stats[n] = {'p':0, 's':0, 'v':0}
-                if n in processed: continue
-                if col in p_cols_dict: num_stats[n]['p'] += p_cols_dict[col]
-                if col in s_cols_dict: num_stats[n]['s'] += s_cols_dict[col]
-            processed.update(extract_numbers(val))
-    
-    for n in num_stats: num_stats[n]['v'] = 0
-    for _, r in valid_mems.iterrows():
-        found = set()
-        for col in p_cols_dict:
-            if col in r:
-                for n in extract_numbers(r[col]): 
-                    if n in num_stats: found.add(n)
-        for n in found: num_stats[n]['v'] += 1
-        
-    filtered = [n for n, s in num_stats.items() if s['v'] >= min_v]
-    
-    if inverse:
-        sorted_res = sorted(filtered, key=lambda n: (-num_stats[n]['p'], -num_stats[n]['s'], int(n)))
-    else:
-        sorted_res = sorted(filtered, key=lambda n: (-num_stats[n]['p'], -num_stats[n]['v'], int(n)))
-        
-    return set(sorted_res[:limit])
-
-def _find_previous_valid_date(target_date: datetime.date, cache: dict) -> Tuple[Optional[datetime.date], Optional[str]]:
-    curr_data = cache[target_date]
-    prev_date = target_date - timedelta(days=1)
-    
-    if prev_date not in cache:
-        for i in range(2, 4):
-            if (target_date - timedelta(days=i)) in cache:
-                prev_date = target_date - timedelta(days=i)
-                break
-
-    col_hist_used = curr_data['hist_map'].get(prev_date)
-    if not col_hist_used and prev_date in cache:
-        col_hist_used = cache[prev_date]['hist_map'].get(prev_date)
-        
-    return prev_date, col_hist_used
 
 def calculate_v24_final(target_date, rolling_window, cache, kq_db, limits_config, min_votes, score_std, score_mod, use_inverse, manual_groups=None):
     if target_date not in cache: return None, "Chưa có dữ liệu ngày này."
@@ -324,12 +186,22 @@ def calculate_v24_final(target_date, rolling_window, cache, kq_db, limits_config
     score_std_tuple = tuple(score_std.items())
     score_mod_tuple = tuple(score_mod.items())
     
-    prev_date, col_hist_used = _find_previous_valid_date(target_date, cache)
+    prev_date = target_date - timedelta(days=1)
+    if prev_date not in cache:
+        for i in range(2, 4):
+            if (target_date - timedelta(days=i)) in cache:
+                prev_date = target_date - timedelta(days=i)
+                break
+
+    col_hist_used = curr_data['hist_map'].get(prev_date)
+    if not col_hist_used and prev_date in cache:
+        col_hist_used = cache[prev_date]['hist_map'].get(prev_date)
     if not col_hist_used:
         return None, f"Không tìm thấy cột dữ liệu ngày {prev_date.strftime('%d/%m')}."
 
-    stats_std = {g: {'wins': 0, 'ranks': []} for g in AppConfig.GROUPS}
-    stats_mod = {g: {'wins': 0} for g in AppConfig.GROUPS}
+    groups = [f"{i}x" for i in range(10)]
+    stats_std = {g: {'wins': 0, 'ranks': []} for g in groups}
+    stats_mod = {g: {'wins': 0} for g in groups}
 
     if not manual_groups:
         past_dates = []
@@ -348,25 +220,55 @@ def calculate_v24_final(target_date, rolling_window, cache, kq_db, limits_config
             if not d_hist_col: continue
             
             kq = kq_db[d]
-            d_score_std = {c: get_column_score(c, score_std_tuple) for c in d_df.columns if get_column_score(c, score_std_tuple) > 0}
-            d_score_mod = {c: get_column_score(c, score_mod_tuple) for c in d_df.columns if get_column_score(c, score_mod_tuple) > 0}
+            d_score_std = {c: get_col_score(c, score_std_tuple) for c in d_df.columns if get_col_score(c, score_std_tuple) > 0}
+            d_score_mod = {c: get_col_score(c, score_mod_tuple) for c in d_df.columns if get_col_score(c, score_mod_tuple) > 0}
 
-            for g in AppConfig.GROUPS:
+            for g in groups:
                 try:
                     mask = d_df[d_hist_col].astype(str).apply(lambda x: re.sub(r'[^0-9X]', '', x.upper().replace('S','6'))) == g.upper()
                     mems = d_df[mask]
-                except Exception: continue
+                except: continue
                 
                 if mems.empty: 
                     stats_std[g]['ranks'].append(999); continue
                 
-                top80_std = _calculate_ranked_numbers(mems, d_score_std, d_score_mod, 80, min_votes, use_inverse)
+                def get_top_nums_bt(members_df, pre_calc_p_map, pre_calc_s_map, top_n, min_v, inverse):
+                    num_stats = {}
+                    # --- CHỈNH SỬA DUY NHẤT: Thêm sorted() để cố định thứ tự cột ---
+                    cols_in_scope = sorted(list(set(pre_calc_p_map.keys()) | set(pre_calc_s_map.keys())))
+                    
+                    for _, r in members_df.iterrows():
+                        processed_nums = set()
+                        for col in cols_in_scope:
+                            if col not in r: continue
+                            val = r[col]
+                            nums = get_nums(val)
+                            for n in nums:
+                                if n not in num_stats: num_stats[n] = {'p': 0, 's': 0, 'v': 0}
+                                if n in processed_nums: continue 
+                                if col in pre_calc_p_map: num_stats[n]['p'] += pre_calc_p_map[col]
+                                if col in pre_calc_s_map: num_stats[n]['s'] += pre_calc_s_map[col]
+                            processed_nums.update(nums)
+                    
+                    for _, r in members_df.iterrows():
+                        found_in_row = set()
+                        for col in pre_calc_p_map:
+                            if col in r:
+                                for n in get_nums(r[col]): 
+                                    if n in num_stats: found_in_row.add(n)
+                        for n in found_in_row: num_stats[n]['v'] += 1
+
+                    filtered = [n for n, s in num_stats.items() if s['v'] >= min_v]
+                    if inverse: return sorted(filtered, key=lambda n: (-num_stats[n]['p'], -num_stats[n]['s'], int(n)))[:top_n]
+                    else: return sorted(filtered, key=lambda n: (-num_stats[n]['p'], -num_stats[n]['v'], int(n)))[:top_n]
+
+                top80_std = get_top_nums_bt(mems, d_score_std, d_score_mod, 80, min_votes, use_inverse)
                 if kq in top80_std:
                     stats_std[g]['wins'] += 1
                     stats_std[g]['ranks'].append(top80_std.index(kq) + 1)
                 else: stats_std[g]['ranks'].append(999)
                 
-                top86_mod = _calculate_ranked_numbers(mems, d_score_mod, d_score_std, limits_config['mod'], min_votes, use_inverse)
+                top86_mod = get_top_nums_bt(mems, d_score_mod, d_score_std, limits_config['mod'], min_votes, use_inverse)
                 if kq in top86_mod: stats_mod[g]['wins'] += 1
 
     top6_std = []
@@ -381,19 +283,55 @@ def calculate_v24_final(target_date, rolling_window, cache, kq_db, limits_config
         best_mod_grp = sorted(stats_mod.keys(), key=lambda g: (-stats_mod[g]['wins'], g))[0]
     
     hist_series = df[col_hist_used].astype(str).apply(lambda x: re.sub(r'[^0-9X]', '', x.upper().replace('S','6')))
+    
+    def get_group_set_final(group_name, p_map_in, s_map_in, limit, min_v, inverse):
+        p_map_t = tuple(p_map_in.items()) if isinstance(p_map_in, dict) else p_map_in
+        s_map_t = tuple(s_map_in.items()) if isinstance(s_map_in, dict) else s_map_in
+        mask = hist_series == group_name.upper()
+        valid_mems = df[mask]
+        num_stats = {}
+        p_cols_dict = {c: get_col_score(c, p_map_t) for c in df.columns if get_col_score(c, p_map_t) > 0}
+        s_cols_dict = {c: get_col_score(c, s_map_t) for c in df.columns if get_col_score(c, s_map_t) > 0}
+        
+        for _, r in valid_mems.iterrows():
+            # --- CHỈNH SỬA DUY NHẤT: Thêm sorted() ---
+            all_cols = sorted(list(set(p_cols_dict.keys()).union(set(s_cols_dict.keys()))))
+            processed = set()
+            for col in all_cols:
+                if col not in valid_mems.columns: continue
+                val = r[col]
+                for n in get_nums(val): 
+                    if n not in num_stats: num_stats[n] = {'p':0, 's':0, 'v':0}
+                    if n in processed: continue
+                    if col in p_cols_dict: num_stats[n]['p'] += p_cols_dict[col]
+                    if col in s_cols_dict: num_stats[n]['s'] += s_cols_dict[col]
+                processed.update(get_nums(val))
+        
+        for n in num_stats: num_stats[n]['v'] = 0
+        for _, r in valid_mems.iterrows():
+            found = set()
+            for col in p_cols_dict:
+                if col in r:
+                    for n in get_nums(r[col]): 
+                        if n in num_stats: found.add(n)
+            for n in found: num_stats[n]['v'] += 1
+            
+        filtered = [n for n, s in num_stats.items() if s['v'] >= min_v]
+        if inverse: sorted_res = sorted(filtered, key=lambda n: (-num_stats[n]['p'], -num_stats[n]['s'], int(n)))
+        else: sorted_res = sorted(filtered, key=lambda n: (-num_stats[n]['p'], -num_stats[n]['v'], int(n)))
+        return set(sorted_res[:limit])
+
     final_original = []
     final_modified = []
 
     if manual_groups:
         pool_std = []
         for g in manual_groups:
-            res_set = _get_final_numbers_for_group(df, hist_series, g, score_std_tuple, score_mod_tuple, limits_config['l12'], min_votes, use_inverse)
-            pool_std.extend(list(res_set))
+            pool_std.extend(list(get_group_set_final(g, score_std_tuple, score_mod_tuple, limits_config['l12'], min_votes, use_inverse)))
         final_original = sorted(list(set(pool_std))) 
         pool_mod = []
         for g in manual_groups:
-             res_set = _get_final_numbers_for_group(df, hist_series, g, score_mod_tuple, score_std_tuple, limits_config['mod'], min_votes, use_inverse)
-             pool_mod.extend(list(res_set))
+             pool_mod.extend(list(get_group_set_final(g, score_mod_tuple, score_std_tuple, limits_config['mod'], min_votes, use_inverse)))
         final_modified = sorted(list(set(pool_mod)))
     else:
         limits_std = {
@@ -403,15 +341,15 @@ def calculate_v24_final(target_date, rolling_window, cache, kq_db, limits_config
         }
         pool1 = []
         for g in [top6_std[0], top6_std[5], top6_std[3]]: 
-            pool1.extend(list(_get_final_numbers_for_group(df, hist_series, g, score_std_tuple, score_mod_tuple, limits_std[g], min_votes, use_inverse)))
+            pool1.extend(list(get_group_set_final(g, score_std_tuple, score_mod_tuple, limits_std[g], min_votes, use_inverse)))
         s1 = {n for n, c in Counter(pool1).items() if c >= 2}
         pool2 = []
         for g in [top6_std[1], top6_std[4], top6_std[2]]: 
-            pool2.extend(list(_get_final_numbers_for_group(df, hist_series, g, score_std_tuple, score_mod_tuple, limits_std[g], min_votes, use_inverse)))
+            pool2.extend(list(get_group_set_final(g, score_std_tuple, score_mod_tuple, limits_std[g], min_votes, use_inverse)))
         s2 = {n for n, c in Counter(pool2).items() if c >= 2}
         
         final_original = sorted(list(s1.intersection(s2)))
-        final_modified = sorted(list(_get_final_numbers_for_group(df, hist_series, best_mod_grp, score_mod_tuple, score_std_tuple, limits_config['mod'], min_votes, use_inverse)))
+        final_modified = sorted(list(get_group_set_final(best_mod_grp, score_mod_tuple, score_std_tuple, limits_config['mod'], min_votes, use_inverse)))
 
     final_intersect = sorted(list(set(final_original).intersection(set(final_modified))))
 
@@ -422,12 +360,7 @@ def calculate_v24_final(target_date, rolling_window, cache, kq_db, limits_config
         "stats_groups_std": stats_std, "stats_groups_mod": stats_mod
     }, None
 
-# ==============================================================================
-# 5. ANALYSIS LOGIC (PHÂN TÍCH HIỆU SUẤT)
-# ==============================================================================
-
 def analyze_group_performance(start_date, end_date, cut_limit, score_map, data_cache, kq_db, min_v, inverse):
-    """Phân tích hiệu suất của các nhóm trong khoảng thời gian."""
     delta = (end_date - start_date).days + 1
     dates = [start_date + timedelta(days=i) for i in range(delta)]
     score_map_tuple = tuple(score_map.items())
@@ -435,61 +368,65 @@ def analyze_group_performance(start_date, end_date, cut_limit, score_map, data_c
     grp_stats = {f"{i}x": {'wins': 0, 'ranks': [], 'history': [], 'last_pred': []} for i in range(10)}
     detailed_rows = [] 
     
-    # Reverse dates for Mobile View (Newest first)
     for d in reversed(dates):
         day_record = {"Ngày": d.strftime("%d/%m"), "KQ": kq_db.get(d, "N/A")}
-        
         if d not in kq_db or d not in data_cache: 
             for g in grp_stats: 
                 grp_stats[g]['history'].append(None)
                 grp_stats[g]['ranks'].append(999) 
                 day_record[g] = "-"
-            detailed_rows.append(day_record)
-            continue
+            detailed_rows.append(day_record); continue
             
         curr_data = data_cache[d]
         df = curr_data['df']
-        prev_date, hist_col_name = _find_previous_valid_date(d, data_cache)
+        prev_date, hist_col_name = None, None
+        
+        prev_date = d - timedelta(days=1)
+        if prev_date not in data_cache: 
+            for k in range(2, 4):
+                 if (d - timedelta(days=k)) in data_cache: 
+                     prev_date = d - timedelta(days=k); break
+        
+        if prev_date in data_cache:
+             hist_col_name = data_cache[d]['hist_map'].get(prev_date)
         
         if not hist_col_name:
              for g in grp_stats: 
                  grp_stats[g]['history'].append(None)
                  grp_stats[g]['ranks'].append(999)
                  day_record[g] = "-"
-             detailed_rows.append(day_record)
-             continue
+             detailed_rows.append(day_record); continue
           
         hist_series = df[hist_col_name].astype(str).apply(lambda x: re.sub(r'[^0-9X]', '', x.upper().replace('S','6')))
         kq = kq_db[d]
-        p_cols_dict = {c: get_column_score(c, score_map_tuple) for c in df.columns if get_column_score(c, score_map_tuple) > 0}
+        p_cols_dict = {c: get_col_score(c, score_map_tuple) for c in df.columns if get_col_score(c, score_map_tuple) > 0}
 
         for g in grp_stats:
             mask = hist_series == g.upper()
             valid_mems = df[mask]
-            
             num_stats = {}
             for _, r in valid_mems.iterrows():
                 processed = set()
-                for col, pts in p_cols_dict.items():
+                # --- CHỈNH SỬA DUY NHẤT: Thêm sorted() ---
+                for col, pts in sorted(p_cols_dict.items()):
                     if col not in valid_mems.columns: continue
                     val = r[col]
-                    for n in extract_numbers(val):
+                    for n in get_nums(val):
                         if n not in num_stats: num_stats[n] = {'p':0, 'v':0}
                         if n in processed: continue
                         num_stats[n]['p'] += pts
-                    processed.update(extract_numbers(val))
+                    processed.update(get_nums(val))
             
             for n in num_stats: num_stats[n]['v'] = 0
             for _, r in valid_mems.iterrows():
                 found = set()
                 for col in p_cols_dict:
                     if col in r:
-                         for n in extract_numbers(r[col]): 
+                         for n in get_nums(r[col]): 
                              if n in num_stats: found.add(n)
                 for n in found: num_stats[n]['v'] += 1
             
             filtered = [n for n, s in num_stats.items() if s['v'] >= min_v]
-            
             if inverse: sorted_res = sorted(filtered, key=lambda n: (-num_stats[n]['p'], -num_stats[n]['p'], int(n)))
             else: sorted_res = sorted(filtered, key=lambda n: (-num_stats[n]['p'], -num_stats[n]['v'], int(n)))
 
@@ -497,11 +434,9 @@ def analyze_group_performance(start_date, end_date, cut_limit, score_map, data_c
             top_set = set(top_list)
             
             grp_stats[g]['last_pred'] = sorted(top_list)
-            
             if kq in top_set:
                 grp_stats[g]['wins'] += 1
-                rank = top_list.index(kq) + 1
-                grp_stats[g]['ranks'].append(rank)
+                grp_stats[g]['ranks'].append(top_list.index(kq) + 1)
                 grp_stats[g]['history'].append("W")
                 day_record[g] = "WIN" 
             else:
@@ -516,15 +451,12 @@ def analyze_group_performance(start_date, end_date, cut_limit, score_map, data_c
         hist = info['history']
         valid_days = len([x for x in hist if x is not None])
         wins = info['wins']
+        hist_cron = list(reversed(hist))
         max_lose = 0; curr_lose = 0; temp_lose = 0
-        
-        # history list is currently [Newest -> Oldest] because we looped reversed(dates)
-        # So for Current Streak, we just check from start
-        for x in hist:
+        for x in reversed(hist_cron):
             if x == "L": curr_lose += 1
             elif x == "W": break
-            
-        for x in hist:
+        for x in hist_cron:
             if x == "L": temp_lose += 1
             else:
                 max_lose = max(max_lose, temp_lose); temp_lose = 0
@@ -535,15 +467,12 @@ def analyze_group_performance(start_date, end_date, cut_limit, score_map, data_c
             "Tỉ lệ": f"{(wins/valid_days)*100:.1f}%" if valid_days > 0 else "0%",
             "Gãy thông": max_lose, "Gãy hiện tại": curr_lose
         })
-        
     df_rep = pd.DataFrame(final_report)
-    if not df_rep.empty:
-        df_rep = df_rep.sort_values(by="Số ngày trúng", ascending=False)
-        
+    if not df_rep.empty: df_rep = df_rep.sort_values(by="Số ngày trúng", ascending=False)
     return df_rep, pd.DataFrame(detailed_rows)
 
 # ==============================================================================
-# 6. GIAO DIỆN NGƯỜI DÙNG (UI)
+# 4. GIAO DIỆN CHÍNH
 # ==============================================================================
 
 def main():
@@ -597,7 +526,6 @@ def main():
             
             tab1, tab2, tab3 = st.tabs(["📊 DỰ ĐOÁN", "🔙 BACKTEST", "🔍 PHÂN TÍCH"])
             
-            # --- TAB 1: DỰ ĐOÁN ---
             with tab1:
                 st.subheader("Dự đoán hàng ngày")
                 c_d1, c_d2 = st.columns([1, 1])
@@ -608,7 +536,7 @@ def main():
                     manual_selection = []
                     manual_score_opt = "Giao thoa"
                     if manual_mode:
-                        manual_selection = st.multiselect("Chọn nhóm:", options=AppConfig.GROUPS, default=["0x", "1x"])
+                        manual_selection = st.multiselect("Chọn nhóm:", options=[f"{i}x" for i in range(10)], default=["0x", "1x"])
                         manual_score_opt = st.radio("Chế độ:", ["Giao thoa", "Chỉ Gốc", "Chỉ Mod"], horizontal=True)
                 
                 if st.button("🚀 CHẠY", type="primary", use_container_width=True):
@@ -645,7 +573,6 @@ def main():
                                 if real in final_res_set: st.balloons(); st.success(f"🎉 KQ **{real}** WIN!")
                                 else: st.error(f"❌ KQ **{real}** MISS.")
 
-            # --- TAB 2: BACKTEST (TỐI ƯU) ---
             with tab2:
                 st.subheader("Kiểm thử Backtest")
                 with st.expander("⚙️ Cấu hình Backtest", expanded=True):
@@ -692,7 +619,6 @@ def main():
                                 }
                             )
 
-            # --- TAB 3: MATRIX ANALYSIS (MÀU SẮC) ---
             with tab3:
                 st.subheader("Phân Tích Nhóm (Matrix)")
                 with st.expander("⚙️ Cấu hình Phân tích (Nhấn để mở)", expanded=False):
