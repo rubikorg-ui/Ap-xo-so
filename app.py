@@ -10,14 +10,14 @@ from functools import lru_cache
 # 1. CẤU HÌNH HỆ THỐNG & UI
 # ==============================================================================
 st.set_page_config(
-    page_title="Quang Pro V25", 
+    page_title="Quang Pro V26", 
     page_icon="🎯", 
     layout="wide",
     initial_sidebar_state="collapsed" 
 )
 
 st.title("🎯 Quang Handsome: Matrix Edition")
-st.caption("🚀 Mobile Optimized | V25 Multi-Config | Custom Logic")
+st.caption("🚀 Mobile Optimized | V26 Hybrid Config | Smart Logic")
 
 # Regex & Sets (Nguyên bản)
 RE_NUMS = re.compile(r'\d+')
@@ -471,16 +471,22 @@ def analyze_group_performance(start_date, end_date, cut_limit, score_map, data_c
 # 4. GIAO DIỆN CHÍNH
 # ==============================================================================
 
-# Bộ tham số mẫu
+# Bộ tham số mẫu (Presets)
 SCORES_PRESETS = {
     "Gốc (V24 Standard)": {
         "STD": [0, 1, 2, 3, 4, 5, 6, 7, 15, 25, 50],
         "MOD": [0, 5, 10, 15, 30, 30, 50, 35, 25, 25, 40]
     },
     "Tối ưu (Big Data 2026)": {
-        # STD Mới: Dựa trên phân tích 1500+ lượt (M10=60)
+        # STD dựa trên data thực tế
         "STD": [0, 1, 2, 3, 4, 8, 10, 15, 25, 40, 60],
-        # MOD Cũ: Giữ nguyên như bản gốc theo yêu cầu
+        # MOD giữ nguyên bản gốc theo yêu cầu
+        "MOD": [0, 5, 10, 15, 30, 30, 50, 35, 25, 25, 40]
+    },
+    "Lai tạo (Hybrid - Thực chiến)": {
+        # Giảm M10 để tránh nhiễu, tăng M4-M6
+        "STD": [0, 2, 4, 6, 12, 16, 20, 25, 30, 32, 35],
+        # MOD giữ nguyên bản gốc
         "MOD": [0, 5, 10, 15, 30, 30, 50, 35, 25, 25, 40]
     }
 }
@@ -488,9 +494,8 @@ SCORES_PRESETS = {
 def main():
     uploaded_files = st.file_uploader("📂 Tải file CSV/Excel", type=['xlsx', 'csv'], accept_multiple_files=True)
 
-    # Initialize Session State
     if 'std_0' not in st.session_state:
-        # Default load Original Goc settings first
+        # Mặc định load bản Gốc
         def_vals = SCORES_PRESETS["Gốc (V24 Standard)"]
         for i in range(11):
             st.session_state[f'std_{i}'] = def_vals["STD"][i]
@@ -513,7 +518,7 @@ def main():
             st.selectbox(
                 "📚 Chọn bộ tham số mẫu:",
                 options=["Tùy chỉnh"] + list(SCORES_PRESETS.keys()),
-                index=1, # Default is Standard
+                index=3, # Default to Hybrid
                 key="preset_choice",
                 on_change=update_scores
             )
