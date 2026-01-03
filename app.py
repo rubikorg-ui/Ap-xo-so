@@ -17,7 +17,7 @@ st.set_page_config(
 )
 
 st.title("🎯 Quang Handsome: Matrix Edition")
-st.caption("🚀 Mobile Optimized | V25 Multi-Config | Big Data Ready")
+st.caption("🚀 Mobile Optimized | V25 Multi-Config | Custom Logic")
 
 # Regex & Sets (Nguyên bản)
 RE_NUMS = re.compile(r'\d+')
@@ -32,6 +32,7 @@ BAD_KEYWORDS = frozenset(['N', 'NGHI', 'SX', 'XIT', 'MISS', 'TRUOT', 'NGHỈ', '
 
 @lru_cache(maxsize=10000)
 def get_nums(s):
+    """"""
     if pd.isna(s): return []
     s_str = str(s).strip()
     if not s_str: return []
@@ -42,6 +43,7 @@ def get_nums(s):
 
 @lru_cache(maxsize=1000)
 def get_col_score(col_name, mapping_tuple):
+    """"""
     clean = RE_CLEAN_SCORE.sub('', str(col_name).upper())
     mapping = dict(mapping_tuple)
     if 'M10' in clean: return mapping.get('M10', 0)
@@ -53,6 +55,7 @@ def get_col_score(col_name, mapping_tuple):
     return 0
 
 def parse_date_smart(col_str, f_m, f_y):
+    """"""
     s = str(col_str).strip().upper()
     s = s.replace('NGAY', '').replace('NGÀY', '').strip()
     match_iso = RE_ISO_DATE.search(s)
@@ -95,6 +98,7 @@ def extract_meta_from_filename(filename):
 
 @st.cache_data(ttl=600)
 def load_data_v24(files):
+    """"""
     cache = {} 
     kq_db = {}
     err_logs = []
@@ -474,18 +478,20 @@ SCORES_PRESETS = {
         "MOD": [0, 5, 10, 15, 30, 30, 50, 35, 25, 25, 40]
     },
     "Tối ưu (Big Data 2026)": {
+        # STD Mới: Dựa trên phân tích 1500+ lượt (M10=60)
         "STD": [0, 1, 2, 3, 4, 8, 10, 15, 25, 40, 60],
-        "MOD": [0, 3, 5, 8, 12, 20, 30, 45, 60, 80, 100]
+        # MOD Cũ: Giữ nguyên như bản gốc theo yêu cầu
+        "MOD": [0, 5, 10, 15, 30, 30, 50, 35, 25, 25, 40]
     }
 }
 
 def main():
     uploaded_files = st.file_uploader("📂 Tải file CSV/Excel", type=['xlsx', 'csv'], accept_multiple_files=True)
 
-    # Initialize Session State for Scores if not exists
+    # Initialize Session State
     if 'std_0' not in st.session_state:
-        # Default load "Tối ưu" first time
-        def_vals = SCORES_PRESETS["Tối ưu (Big Data 2026)"]
+        # Default load Original Goc settings first
+        def_vals = SCORES_PRESETS["Gốc (V24 Standard)"]
         for i in range(11):
             st.session_state[f'std_{i}'] = def_vals["STD"][i]
             st.session_state[f'mod_{i}'] = def_vals["MOD"][i]
@@ -496,7 +502,6 @@ def main():
         
         with st.expander("🎚️ 1. Điểm M0-M10 (Cấu hình)", expanded=False):
             
-            # --- PRESET SELECTOR ---
             def update_scores():
                 choice = st.session_state.preset_choice
                 if choice in SCORES_PRESETS:
@@ -508,7 +513,7 @@ def main():
             st.selectbox(
                 "📚 Chọn bộ tham số mẫu:",
                 options=["Tùy chỉnh"] + list(SCORES_PRESETS.keys()),
-                index=2, # Default to Big Data (index 2 because of "Tuy chinh" at 0)
+                index=1, # Default is Standard
                 key="preset_choice",
                 on_change=update_scores
             )
@@ -518,7 +523,6 @@ def main():
             custom_std = {}
             custom_mod = {}
             
-            # Dynamic Inputs linked to Session State
             with c_s1:
                 st.write("**GỐC (Std)**")
                 for i in range(11): 
