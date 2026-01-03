@@ -232,7 +232,7 @@ def load_data_v24(files):
             
     return cache, kq_db, file_status, err_logs
 
-# --- HÀM TÍNH TOÁN CORE ---
+# --- HÀM TÍNH TOÁN CORE (GIỮ NGUYÊN BẢN GỐC - KHÔNG CHỈNH SỬA) ---
 def calculate_v24_final(target_date, rolling_window, cache, kq_db, limits_config, min_votes, score_std, score_mod, use_inverse, manual_groups=None):
     if target_date not in cache: return None, "Chưa có dữ liệu ngày này."
     curr_data = cache[target_date]
@@ -251,7 +251,6 @@ def calculate_v24_final(target_date, rolling_window, cache, kq_db, limits_config
         
     if not col_hist_used:
         return None, f"Không tìm thấy cột dữ liệu ngày {prev_date.strftime('%d/%m')}."
-    
     groups = [f"{i}x" for i in range(10)]
     stats_std = {g: {'wins': 0, 'ranks': []} for g in groups}
     stats_mod = {g: {'wins': 0} for g in groups}
@@ -289,10 +288,16 @@ def calculate_v24_final(target_date, rolling_window, cache, kq_db, limits_config
                     stats_std[g]['ranks'].append(999)
                     continue
                 
+                # --- FIX CRASH: LOGIC BACKTEST MỚI ---
                 def get_top_nums_bt(members_df, pre_calc_p_map, pre_calc_s_map, top_n, min_v, inverse):
                     num_stats = {}
+                    # Ở đây pre_calc_p_map là Dictionary {Tên Cột: Điểm} đã tính sẵn
+                    # Nên ta không gọi get_col_score nữa mà dùng trực tiếp
+                    
                     for _, r in members_df.iterrows():
+                        # Lọc lấy các cột có trong members_df (vì pre_calc chứa toàn bộ cột của sheet)
                         cols_in_row = [c for c in members_df.columns if c in pre_calc_p_map or c in pre_calc_s_map]
+                        
                         processed_nums = set()
                         for col in cols_in_row:
                             val = r[col]
@@ -300,15 +305,17 @@ def calculate_v24_final(target_date, rolling_window, cache, kq_db, limits_config
                             for n in nums:
                                 if n not in num_stats: num_stats[n] = {'p_score': 0, 's_score': 0, 'votes': 0}
                                 if n in processed_nums: continue 
+                                
                                 if col in pre_calc_p_map: num_stats[n]['p_score'] += pre_calc_p_map[col]
                                 if col in pre_calc_s_map: num_stats[n]['s_score'] += pre_calc_s_map[col]
                             processed_nums.update(nums)
                     
+                    # Tính Vote (Dựa trên hệ thống điểm chính)
                     for n in num_stats: num_stats[n]['votes'] = 0
                     for _, r in members_df.iterrows():
                         found_in_row = set()
                         for col in members_df.columns:
-                            if col in pre_calc_p_map:
+                            if col in pre_calc_p_map: # Chỉ xét cột thuộc hệ điểm chính
                                 if col in r:
                                     for n in get_nums(r[col]): 
                                         if n in num_stats: found_in_row.add(n)
@@ -342,6 +349,7 @@ def calculate_v24_final(target_date, rolling_window, cache, kq_db, limits_config
         top6_std = [x[0] for x in final_std[:6]]
         best_mod_grp = sorted(stats_mod.keys(), key=lambda g: (-stats_mod[g]['wins'], g))[0]
     
+    # Dự đoán (Phần này vẫn dùng get_col_score vì chạy 1 lần, không sao)
     hist_series = df[col_hist_used].astype(str).apply(lambda x: re.sub(r'[^0-9X]', '', x.upper().replace('S','6')))
     
     def get_group_set_final(group_name, p_map, s_map, limit, min_v, inverse):
@@ -482,7 +490,7 @@ def analyze_group_performance(start_date, end_date, cut_limit, score_map, data_c
             valid_mems = df[mask]
             
             num_stats = {}
-            # --- Tính điểm (Scoring) ---
+            # --- Tính điểm (Scoring) - Sử dụng đúng get_col_score và get_nums toàn cục ---
             for _, r in valid_mems.iterrows():
                 p_cols = {c: get_col_score(c, score_map) for c in df.columns if get_col_score(c, score_map) > 0}
                 processed = set()
@@ -495,7 +503,7 @@ def analyze_group_performance(start_date, end_date, cut_limit, score_map, data_c
                         num_stats[n]['p'] += pts
                     processed.update(get_nums(val))
             
-            # --- Tính Vote ---
+            # --- Tính Vote - Cơ chế chuẩn: Check sự xuất hiện trong các cột điểm ---
             for n in num_stats: num_stats[n]['v'] = 0
             for _, r in valid_mems.iterrows():
                 p_cols = {c: get_col_score(c, score_map) for c in df.columns if get_col_score(c, score_map) > 0}
@@ -506,7 +514,7 @@ def analyze_group_performance(start_date, end_date, cut_limit, score_map, data_c
                             if n in num_stats: found.add(n)
                 for n in found: num_stats[n]['v'] += 1
             
-            # --- Lọc & Xếp hạng ---
+            # --- Lọc & Xếp hạng (Logic chuẩn) ---
             filtered = [n for n, s in num_stats.items() if s['v'] >= min_v]
             
             if inverse:
@@ -611,20 +619,31 @@ if uploaded_files:
             with c_d2:
                 manual_mode = st.checkbox("🛠️ Chế độ Tự Chọn Nhóm (Bỏ qua Top 6)", value=False)
                 manual_selection = []
+                manual_score_opt = "Giao thoa (Gốc + Mod)" # Mặc định
                 if manual_mode:
                     manual_selection = st.multiselect("Chọn các nhóm muốn ghép dàn:", 
                                                       options=[f"{i}x" for i in range(10)],
                                                       default=["0x", "1x"])
+                    # --- NÚT CHỌN HỆ ĐIỂM (MỚI) ---
+                    st.caption("Tùy chọn hệ điểm cho dàn Final:")
+                    manual_score_opt = st.radio("", ["Giao thoa (Gốc + Mod)", "Chỉ Gốc (Std)", "Chỉ Modified"], horizontal=True, key="man_score")
             
             if st.button("🚀 CHẠY DỰ ĐOÁN", type="primary"):
                 with st.spinner("Đang tính toán..."):
                     grps = manual_selection if manual_mode else None
+                    # HÀM LOGIC GỐC ĐƯỢC GỌI Y NGUYÊN
                     res, err = calculate_v24_final(target, ROLLING_WINDOW, data_cache, kq_db, limit_cfg, MIN_VOTES, custom_std, custom_mod, USE_INVERSE, grps)
                     if err: st.error(err)
                     else:
                         st.info(f"Phân nhóm dựa trên ngày: {res['source_col']}")
                         if manual_mode: st.warning(f"⚠️ Đang chạy chế độ THỦ CÔNG: {', '.join(manual_selection)}")
                         
+                        # --- XỬ LÝ HIỂN THỊ DỰA TRÊN LỰA CHỌN (UI LOGIC ONLY) ---
+                        final_res_set = res['dan_final']
+                        if manual_mode:
+                            if manual_score_opt == "Chỉ Gốc (Std)": final_res_set = res['dan_goc']
+                            elif manual_score_opt == "Chỉ Modified": final_res_set = res['dan_mod']
+
                         c1, c2, c3 = st.columns(3)
                         with c1:
                             st.subheader("1️⃣ Dàn Gốc")
@@ -636,14 +655,16 @@ if uploaded_files:
                             st.text_area(f"Modified ({len(res['dan_mod'])} số):", ",".join(res['dan_mod']), height=150)
                         with c3:
                             st.subheader("3️⃣ FINAL")
-                            st.caption("Giao thoa")
-                            st.code(",".join(res['dan_final']), language="text")
-                            st.metric("Số lượng", f"{len(res['dan_final'])} số")
+                            # Hiển thị chú thích rõ ràng
+                            st.caption(f"Kết quả: {manual_score_opt}" if manual_mode else "Giao thoa")
+                            st.code(",".join(final_res_set), language="text")
+                            st.metric("Số lượng", f"{len(final_res_set)} số")
                         
                         if target in kq_db:
                             real = kq_db[target]
                             st.markdown("---")
-                            if real in res['dan_final']:
+                            # Check Win/Miss dựa trên tập đã chọn
+                            if real in final_res_set:
                                 st.balloons(); st.success(f"🎉 KQ **{real}** WIN FINAL!")
                             else:
                                 st.error(f"❌ Kết quả **{real}** MISS.")
