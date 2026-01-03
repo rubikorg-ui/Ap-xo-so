@@ -10,15 +10,21 @@ from functools import lru_cache
 # ==============================================================================
 # 1. CẤU HÌNH HỆ THỐNG
 # ==============================================================================
-st.set_page_config(page_title="Quang Pro V24", page_icon="🎯", layout="wide")
-st.title("🎯 Quang Handsome: Matrix Edition (Mobile Optimized)")
+st.set_page_config(
+    page_title="Quang Pro V24", 
+    page_icon="🎯", 
+    layout="wide",
+    initial_sidebar_state="collapsed" 
+)
 
-# Pre-compile Regex & Sets (Tối ưu tốc độ, giữ nguyên Logic 100%)
+st.title("🎯 Quang Handsome: Matrix Edition")
+st.caption("🚀 Mobile Optimized | V24 Core Logic")
+
+# Pre-compile Regex & Sets
 RE_NUMS = re.compile(r'\d+')
 RE_CLEAN_SCORE = re.compile(r'[^A-Z0-9]')
 RE_ISO_DATE = re.compile(r'(20\d{2})[\.\-/](\d{1,2})[\.\-/](\d{1,2})')
 RE_SLASH_DATE = re.compile(r'(\d{1,2})[\.\-/](\d{1,2})')
-# Bộ lọc từ khóa xấu giữ nguyên
 BAD_KEYWORDS = frozenset(['N', 'NGHI', 'SX', 'XIT', 'MISS', 'TRUOT', 'NGHỈ', 'LỖI'])
 
 # ==============================================================================
@@ -27,7 +33,7 @@ BAD_KEYWORDS = frozenset(['N', 'NGHI', 'SX', 'XIT', 'MISS', 'TRUOT', 'NGHỈ', '
 
 @lru_cache(maxsize=10000)
 def get_nums(s):
-    """Tách số giữ nguyên logic lọc từ khóa xấu."""
+    """Tách số, lọc từ khóa xấu và chuẩn hóa 01-99."""
     if pd.isna(s): return []
     s_str = str(s).strip()
     if not s_str: return []
@@ -36,12 +42,11 @@ def get_nums(s):
     if any(kw in s_upper for kw in BAD_KEYWORDS): return []
     
     raw_nums = RE_NUMS.findall(s_upper)
-    # Fix lỗi số 5 -> 05 nhưng không thay đổi bản chất số
     return [n.zfill(2) for n in raw_nums if len(n) <= 2]
 
 @lru_cache(maxsize=1000)
 def get_col_score(col_name, mapping_tuple):
-    """Logic lấy điểm cột giữ nguyên thứ tự ưu tiên M10 -> M..."""
+    """Logic lấy điểm cột - Ưu tiên M10."""
     clean = RE_CLEAN_SCORE.sub('', str(col_name).upper())
     mapping = dict(mapping_tuple)
     
@@ -55,6 +60,7 @@ def get_col_score(col_name, mapping_tuple):
     return 0
 
 def parse_date_smart(col_str, f_m, f_y):
+    """Phân tích ngày tháng từ tên cột."""
     s = str(col_str).strip().upper()
     s = s.replace('NGAY', '').replace('NGÀY', '').strip()
     
@@ -86,7 +92,8 @@ def find_header_row(df_preview):
 def extract_meta_from_filename(filename):
     clean_name = filename.upper().replace(".CSV", "").replace(".XLSX", "")
     y_match = re.search(r'20\d{2}', clean_name)
-    y_global = int(y_match.group(0)) if y_match else 2025
+    y_global = int(y_match.group(0)) if y_match else datetime.datetime.now().year
+    
     m_match = re.search(r'(?:THANG|THÁNG|T)[^0-9]*(\d{1,2})', clean_name)
     m_global = int(m_match.group(1)) if m_match else 12
 
@@ -123,12 +130,13 @@ def load_data_v24(files):
                             if len(parts) >= 3 and parts[2] > 2000: y_s = parts[2]; m_s = parts[1]
                             s_date = datetime.date(y_s, m_s, d_s)
                     except: pass
+                    
                     if s_date:
                         preview = pd.read_excel(xls, sheet_name=sheet, header=None, nrows=20)
                         h_row = find_header_row(preview)
                         df = pd.read_excel(xls, sheet_name=sheet, header=h_row)
                         dfs_to_process.append((s_date, df))
-                file_status.append(f"✅ Excel OK: {file.name}")
+                file_status.append(f"✅ Excel: {file.name}")
 
             elif file.name.endswith('.csv'):
                 if not date_from_name: continue
@@ -148,7 +156,7 @@ def load_data_v24(files):
                 df = df_raw.iloc[h_row+1:].copy()
                 df.columns = df_raw.iloc[h_row]
                 dfs_to_process.append((date_from_name, df))
-                file_status.append(f"✅ CSV OK: {file.name} -> {date_from_name}")
+                file_status.append(f"✅ CSV: {file.name}")
 
             for t_date, df in dfs_to_process:
                 df.columns = [str(c).strip().upper() for c in df.columns]
@@ -177,13 +185,13 @@ def load_data_v24(files):
                 cache[t_date] = {'df': df, 'hist_map': hist_map}
 
         except Exception as e:
-            err_logs.append(f"Lỗi file '{file.name}': {str(e)}")
+            err_logs.append(f"Lỗi '{file.name}': {str(e)}")
             continue
             
     return cache, kq_db, file_status, err_logs
 
 # ==============================================================================
-# 3. CORE LOGIC (GIỮ NGUYÊN BẢN CHẤT 100%)
+# 3. CORE LOGIC (GIỮ NGUYÊN 100%)
 # ==============================================================================
 
 def calculate_v24_final(target_date, rolling_window, cache, kq_db, limits_config, min_votes, score_std, score_mod, use_inverse, manual_groups=None):
@@ -212,7 +220,6 @@ def calculate_v24_final(target_date, rolling_window, cache, kq_db, limits_config
     stats_std = {g: {'wins': 0, 'ranks': []} for g in groups}
     stats_mod = {g: {'wins': 0} for g in groups}
 
-    # === LOGIC BACKTEST TÌM TOP ===
     if not manual_groups:
         past_dates = []
         check_d = target_date - timedelta(days=1)
@@ -220,7 +227,7 @@ def calculate_v24_final(target_date, rolling_window, cache, kq_db, limits_config
             if check_d in cache and check_d in kq_db:
                 past_dates.append(check_d)
             check_d -= timedelta(days=1)
-            if (target_date - check_d).days > 35: break
+            if (target_date - check_d).days > 35: break 
 
         for d in past_dates:
             d_df = cache[d]['df']
@@ -244,7 +251,6 @@ def calculate_v24_final(target_date, rolling_window, cache, kq_db, limits_config
                     stats_std[g]['ranks'].append(999)
                     continue
                 
-                # Hàm tính điểm (Logic cũ)
                 def get_top_nums_bt(members_df, pre_calc_p_map, pre_calc_s_map, top_n, min_v, inverse):
                     num_stats = {}
                     cols_in_scope = list(set(pre_calc_p_map.keys()) | set(pre_calc_s_map.keys()))
@@ -298,7 +304,6 @@ def calculate_v24_final(target_date, rolling_window, cache, kq_db, limits_config
         top6_std = [x[0] for x in final_std[:6]]
         best_mod_grp = sorted(stats_mod.keys(), key=lambda g: (-stats_mod[g]['wins'], g))[0]
     
-    # === LOGIC DỰ ĐOÁN (PREDICTION) ===
     hist_series = df[col_hist_used].astype(str).apply(lambda x: re.sub(r'[^0-9X]', '', x.upper().replace('S','6')))
     
     def get_group_set_final(group_name, p_map_in, s_map_in, limit, min_v, inverse):
@@ -487,7 +492,6 @@ def analyze_group_performance(start_date, end_date, cut_limit, score_map, data_c
         hist = info['history']
         valid_days = len([x for x in hist if x is not None])
         wins = info['wins']
-        ranks = info['ranks']
         
         max_lose = 0
         curr_lose = 0
@@ -517,16 +521,16 @@ def analyze_group_performance(start_date, end_date, cut_limit, score_map, data_c
     return df_rep, pd.DataFrame(detailed_rows)
 
 # ==============================================================================
-# 4. GIAO DIỆN NGƯỜI DÙNG (UI)
+# 4. GIAO DIỆN NGƯỜI DÙNG
 # ==============================================================================
 
-uploaded_files = st.file_uploader("Tải TẤT CẢ file CSV/Excel (Tháng 12, Tháng 1...):", type=['xlsx', 'csv'], accept_multiple_files=True)
+uploaded_files = st.file_uploader("📂 Tải file CSV/Excel", type=['xlsx', 'csv'], accept_multiple_files=True)
 
 with st.sidebar:
-    st.header("⚙️ Cài đặt chung")
+    st.header("⚙️ Cài đặt")
     ROLLING_WINDOW = st.number_input("Chu kỳ xét (Ngày)", min_value=1, value=10)
     
-    with st.expander("🎚️ 1. Tự chỉnh điểm M0-M10", expanded=False):
+    with st.expander("🎚️ 1. Điểm M0-M10", expanded=False):
         c_s1, c_s2 = st.columns(2)
         DEF_STD = [0, 1, 2, 3, 4, 5, 6, 7, 15, 25, 50] 
         DEF_MOD = [0, 5, 10, 15, 30, 30, 50, 35, 25, 25, 40]
@@ -535,106 +539,106 @@ with st.sidebar:
         custom_mod = {}
         with c_s1:
             st.write("**GỐC (Std)**")
-            for i in range(11): custom_std[f'M{i}'] = st.number_input(f"Std M{i}", value=DEF_STD[i], key=f"std_{i}")
+            for i in range(11): custom_std[f'M{i}'] = st.number_input(f"M{i}", value=DEF_STD[i], key=f"std_{i}")
         with c_s2:
-            st.write("**MODIFIED**")
-            for i in range(11): custom_mod[f'M{i}'] = st.number_input(f"Mod M{i}", value=DEF_MOD[i], key=f"mod_{i}")
+            st.write("**MOD**")
+            for i in range(11): custom_mod[f'M{i}'] = st.number_input(f"M{i}", value=DEF_MOD[i], key=f"mod_{i}")
 
     st.markdown("---")
-    st.header("⚖️ 2. Cơ chế Lọc")
-    MIN_VOTES = st.number_input("Lọc Vote tối thiểu:", min_value=1, max_value=10, value=1)
-    USE_INVERSE = st.checkbox("Dùng Chấm Điểm Đảo", value=False)
+    st.header("⚖️ Lọc & Cắt")
+    MIN_VOTES = st.number_input("Vote tối thiểu:", min_value=1, max_value=10, value=1)
+    USE_INVERSE = st.checkbox("Chấm Điểm Đảo (Ngược)", value=False)
+    
+    with st.expander("✂️ Chi tiết cắt Top", expanded=False):
+        L_TOP_12 = st.number_input("Top 1 & 2 lấy:", value=80)
+        L_TOP_34 = st.number_input("Top 3 & 4 lấy:", value=65)
+        L_TOP_56 = st.number_input("Top 5 & 6 lấy:", value=60)
+        LIMIT_MODIFIED = st.number_input("Top 1 Modified lấy:", value=86)
 
     st.markdown("---")
-    st.header("✂️ 3. Tùy chọn cắt số (Auto)")
-    L_TOP_12 = st.number_input("Top 1 & 2 lấy:", value=80)
-    L_TOP_34 = st.number_input("Top 3 & 4 lấy:", value=65)
-    L_TOP_56 = st.number_input("Top 5 & 6 lấy:", value=60)
-    LIMIT_MODIFIED = st.number_input("Top 1 Modified lấy:", value=86)
-
-    st.markdown("---")
-    if st.button("🗑️ XÓA CACHE & LÀM MỚI", type="primary"):
+    if st.button("🗑️ XÓA CACHE", type="primary"):
         st.cache_data.clear()
         st.rerun()
 
 if uploaded_files:
     data_cache, kq_db, f_status, err_logs = load_data_v24(uploaded_files)
     
-    with st.expander("🕵️ Debug: Trạng thái File", expanded=False):
-        for s in f_status: st.success(s) if "✅" in s else st.error(s)
+    with st.expander("🕵️ Trạng thái File", expanded=False):
+        for s in f_status:
+            if "✅" in s: st.success(s)
+            else: st.error(s)
+        for e in err_logs: st.error(e)
     
     if data_cache:
         limit_cfg = {'l12': L_TOP_12, 'l34': L_TOP_34, 'l56': L_TOP_56, 'mod': LIMIT_MODIFIED}
         last_d = max(data_cache.keys())
         
-        tab1, tab2, tab3 = st.tabs(["📊 DỰ ĐOÁN (AUTO/MANUAL)", "🔙 BACKTEST", "🔍 PHÂN TÍCH NHÓM"])
+        tab1, tab2, tab3 = st.tabs(["📊 DỰ ĐOÁN", "🔙 BACKTEST", "🔍 PHÂN TÍCH"])
         
         with tab1:
             st.subheader("Dự đoán hàng ngày")
-            c_d1, c_d2 = st.columns([2, 2])
-            with c_d1: target = st.date_input("📅 Ngày dự đoán:", value=last_d)
+            c_d1, c_d2 = st.columns([1, 1])
+            with c_d1: target = st.date_input("Ngày:", value=last_d)
             
             with c_d2:
-                manual_mode = st.checkbox("🛠️ Chế độ Thủ Công (Manual)", value=False)
+                manual_mode = st.checkbox("Thủ Công (Manual)", value=False)
                 manual_selection = []
-                manual_score_opt = "Giao thoa (Gốc + Mod)"
+                manual_score_opt = "Giao thoa"
                 if manual_mode:
                     manual_selection = st.multiselect("Chọn nhóm:", options=[f"{i}x" for i in range(10)], default=["0x", "1x"])
-                    manual_score_opt = st.radio("", ["Giao thoa (Gốc + Mod)", "Chỉ Gốc (Std)", "Chỉ Modified"], horizontal=True, key="man_score")
+                    manual_score_opt = st.radio("Chế độ:", ["Giao thoa", "Chỉ Gốc", "Chỉ Mod"], horizontal=True)
             
-            if st.button("🚀 CHẠY DỰ ĐOÁN", type="primary"):
+            if st.button("🚀 CHẠY", type="primary", use_container_width=True):
                 with st.spinner("Đang tính toán..."):
                     grps = manual_selection if manual_mode else None
                     res, err = calculate_v24_final(target, ROLLING_WINDOW, data_cache, kq_db, limit_cfg, MIN_VOTES, custom_std, custom_mod, USE_INVERSE, grps)
                     if err: st.error(err)
                     else:
-                        st.info(f"Phân nhóm dựa trên ngày: {res['source_col']}")
-                        if manual_mode: st.warning(f"⚠️ Đang chạy chế độ THỦ CÔNG: {', '.join(manual_selection)}")
+                        st.info(f"Phân nhóm theo ngày: {res['source_col']}")
                         
                         final_res_set = res['dan_final']
                         if manual_mode:
-                            if manual_score_opt == "Chỉ Gốc (Std)": final_res_set = res['dan_goc']
-                            elif manual_score_opt == "Chỉ Modified": final_res_set = res['dan_mod']
+                            if manual_score_opt == "Chỉ Gốc": final_res_set = res['dan_goc']
+                            elif manual_score_opt == "Chỉ Mod": final_res_set = res['dan_mod']
 
-                        # --- GIAO DIỆN 3 CỘT ĐỀU NHAU CHO MOBILE ---
                         c1, c2, c3 = st.columns(3)
                         
                         with c1:
-                            st.subheader("1️⃣ Gốc")
-                            if not manual_mode: st.caption(f"Top 6: {', '.join(res['top6_std'])}")
-                            st.text_area(f"Original ({len(res['dan_goc'])} số):", ",".join(res['dan_goc']), height=180)
+                            st.success(f"Gốc ({len(res['dan_goc'])})")
+                            st.text_area("Gốc", ",".join(res['dan_goc']), height=150, label_visibility="collapsed")
+                            if not manual_mode: 
+                                st.caption(f"Top 6: {', '.join(res['top6_std'])}")
 
                         with c2:
-                            st.subheader("2️⃣ Mod")
-                            if not manual_mode: st.caption(f"Best: {res['best_mod']}")
-                            st.text_area(f"Modified ({len(res['dan_mod'])} số):", ",".join(res['dan_mod']), height=180)
+                            st.warning(f"Mod ({len(res['dan_mod'])})")
+                            st.text_area("Mod", ",".join(res['dan_mod']), height=150, label_visibility="collapsed")
+                            if not manual_mode: 
+                                st.caption(f"Best: {res['best_mod']}")
                         
                         with c3:
-                            st.subheader("3️⃣ FINAL")
-                            st.caption(f"Kết quả" if manual_mode else "Giao thoa")
-                            # Hiển thị Final giống hệt 2 dàn kia để dễ copy
-                            st.text_area(f"Final ({len(final_res_set)} số):", ",".join(final_res_set), height=180)
+                            st.error(f"FINAL ({len(final_res_set)})")
+                            st.text_area("Final", ",".join(final_res_set), height=150, label_visibility="collapsed")
                         
                         if target in kq_db:
                             real = kq_db[target]
                             st.markdown("---")
-                            if real in final_res_set: st.balloons(); st.success(f"🎉 KQ **{real}** WIN FINAL!")
-                            else: st.error(f"❌ Kết quả **{real}** MISS.")
+                            if real in final_res_set: 
+                                st.balloons()
+                                st.success(f"🎉 KQ **{real}** WIN!")
+                            else: 
+                                st.error(f"❌ KQ **{real}** MISS.")
 
         with tab2:
-            st.subheader("Kiểm thử Cấu hình (Backtest)")
-            c1, c2, c3 = st.columns([2, 2, 2])
+            st.subheader("Kiểm thử Backtest")
+            c1, c2 = st.columns(2)
             with c1: date_range = st.date_input("Khoảng ngày:", [last_d - timedelta(days=7), last_d])
-            with c2: bt_mode = st.radio("Chế độ:", ["FINAL (Giao thoa)", "Dàn Gốc", "Dàn Mod"], horizontal=True)
-            with c3: show_group_stats = st.checkbox("🔍 Hiện thống kê Nhóm", value=False)
+            with c2: bt_mode = st.selectbox("Chế độ:", ["FINAL (Giao thoa)", "Dàn Gốc", "Dàn Mod"])
 
-            if st.button("🔄 CHẠY BACKTEST"):
-                if len(date_range) < 2: st.warning("Chọn đủ ngày bắt đầu/kết thúc.")
+            if st.button("🔄 CHẠY BACKTEST", use_container_width=True):
+                if len(date_range) < 2: st.warning("Chọn đủ ngày.")
                 else:
                     start, end = date_range[0], date_range[1]
                     logs = []
-                    group_tracker = {f"{i}x": {'wins_real': 0, 'picked_std': 0, 'picked_mod': 0} for i in range(10)}
-                    grp_matrix_logs = []
                     bar = st.progress(0)
                     delta = (end - start).days + 1
                     
@@ -647,51 +651,38 @@ if uploaded_files:
                         real = kq_db[d]
                         t_set = res['dan_final'] if "FINAL" in bt_mode else (res['dan_goc'] if "Gốc" in bt_mode else res['dan_mod'])
                         is_win = real in t_set
-                        logs.append({"Ngày": d.strftime("%d/%m"), "KQ": real, "TT": "WIN" if is_win else "MISS", "Số": len(t_set), "Chi tiết": ",".join(t_set)})
-                        
-                        if show_group_stats:
-                            real_val_str = str(real).zfill(2)
-                            real_grp = f"{real_val_str[0]}x"
-                            if real_grp in group_tracker: group_tracker[real_grp]['wins_real'] += 1
-                            for g in res['top6_std']:
-                                if g in group_tracker: group_tracker[g]['picked_std'] += 1
-                            if res['best_mod'] in group_tracker: group_tracker[res['best_mod']]['picked_mod'] += 1
-                            
-                            day_m = {"Ngày": d.strftime("%d/%m"), "KQ": real}
-                            for g in [f"{k}x" for k in range(10)]:
-                                mark = "░"
-                                if g == real_grp: mark = "✅"
-                                picked = ""
-                                if g in res['top6_std']: picked += "🔹"
-                                if g == res['best_mod']: picked += "🔸"
-                                day_m[g] = f"{mark}{picked}"
-                            grp_matrix_logs.append(day_m)
+                        logs.append({
+                            "Ngày": d.strftime("%d/%m"), 
+                            "KQ": real, 
+                            "TT": "✅ WIN" if is_win else "❌ MISS", 
+                            "Số lượng": len(t_set),
+                            "Chi tiết": ",".join(t_set)
+                        })
 
                     bar.empty()
                     if logs:
-                        st.divider()
                         df_log = pd.DataFrame(logs)
-                        wins = df_log[df_log["TT"]=="WIN"].shape[0]
+                        wins = df_log[df_log["TT"].str.contains("WIN")].shape[0]
                         st.metric(f"Tỉ lệ Win ({bt_mode})", f"{wins}/{df_log.shape[0]}", f"{(wins/df_log.shape[0])*100:.1f}%")
                         st.dataframe(df_log, use_container_width=True)
-                        if show_group_stats:
-                            st.divider()
-                            st.dataframe(pd.DataFrame(grp_matrix_logs), use_container_width=True, height=400)
-                    else: st.warning("Không có dữ liệu.")
 
         with tab3:
-            st.subheader("🔍 Phân Tích Chu Kỳ Nhóm (Matrix View)")
-            c_a1, c_a2, c_a3 = st.columns(3)
-            with c_a1: d_range_a = st.date_input("Khoảng thời gian:", [last_d - timedelta(days=15), last_d], key="dr_a")
-            with c_a2: cut_val = st.number_input("Cắt Top (Limit):", value=60, step=5)
-            with c_a3: score_mode = st.radio("Dùng hệ điểm:", ["Gốc (Std)", "Modified"], horizontal=True)
+            st.subheader("Phân Tích Nhóm (Matrix)")
+            c_a1, c_a2 = st.columns(2)
+            with c_a1: d_range_a = st.date_input("Thời gian:", [last_d - timedelta(days=15), last_d], key="dr_a")
+            with c_a2: 
+                cut_val = st.number_input("Cắt Top:", value=60, step=5)
+                score_mode = st.radio("Hệ điểm:", ["Gốc (Std)", "Modified"], horizontal=True)
             
-            if st.button("🔎 QUÉT MATRIX"):
+            if st.button("🔎 QUÉT MATRIX", use_container_width=True):
                 if len(d_range_a) < 2: st.warning("Chọn đủ ngày.")
                 else:
-                    with st.spinner("Đang phân tích..."):
+                    with st.spinner("Đang xử lý..."):
                         s_map = custom_std if score_mode == "Gốc (Std)" else custom_mod
                         df_report, df_detail = analyze_group_performance(d_range_a[0], d_range_a[1], cut_val, s_map, data_cache, kq_db, MIN_VOTES, USE_INVERSE)
+                        
+                        st.write("📊 **Thống kê tổng hợp**")
                         st.dataframe(df_report, use_container_width=True)
-                        st.divider()
+                        
+                        st.write("📅 **Chi tiết từng ngày**")
                         st.dataframe(df_detail, use_container_width=True, height=500)
