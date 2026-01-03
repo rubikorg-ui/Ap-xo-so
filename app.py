@@ -10,16 +10,16 @@ from functools import lru_cache
 # 1. CẤU HÌNH HỆ THỐNG & UI
 # ==============================================================================
 st.set_page_config(
-    page_title="Quang Pro V26 - K55 Integrated", 
+    page_title="Quang Pro V29 - Customizable UI", 
     page_icon="🎯", 
     layout="wide",
     initial_sidebar_state="collapsed" 
 )
 
-st.title("🎯 Quang Handsome: Matrix V26 + K55 Sniper")
-st.caption("🚀 Mobile Optimized | Hybrid Config | V25 Matrix & K55 HeartMap")
+st.title("🎯 Quang Handsome: V29 Ultimate Custom")
+st.caption("🚀 Final 3 = Gốc + Smart 58 | Tùy chỉnh hiển thị | Logic 100% Fixed")
 
-# Regex & Sets (Nguyên bản V25)
+# Regex & Sets (Nguyên bản)
 RE_NUMS = re.compile(r'\d+')
 RE_CLEAN_SCORE = re.compile(r'[^A-Z0-9]')
 RE_ISO_DATE = re.compile(r'(20\d{2})[\.\-/](\d{1,2})[\.\-/](\d{1,2})')
@@ -27,7 +27,7 @@ RE_SLASH_DATE = re.compile(r'(\d{1,2})[\.\-/](\d{1,2})')
 BAD_KEYWORDS = frozenset(['N', 'NGHI', 'SX', 'XIT', 'MISS', 'TRUOT', 'NGHỈ', 'LỖI'])
 
 # ==============================================================================
-# 2. CÁC HÀM XỬ LÝ DỮ LIỆU CHUNG (V25 CORE)
+# 2. CÁC HÀM XỬ LÝ DỮ LIỆU CHUNG (CORE - GIỮ NGUYÊN)
 # ==============================================================================
 
 @lru_cache(maxsize=10000)
@@ -170,33 +170,25 @@ def load_data_v24(files):
     return cache, kq_db, file_status, err_logs
 
 # ==============================================================================
-# 3. MODULE K55 (NEW: 100% LOGIC PRESERVED)
+# 3. MODULE K55 (100% LOGIC PRESERVED)
 # ==============================================================================
-
 def k55_parse_numbers(val):
-    """Helper riêng cho K55 để đảm bảo đúng logic gốc regex"""
     if pd.isna(val): return []
     nums = re.findall(r'\d+', str(val))
     return [f"{int(n):02d}" for n in nums]
 
 def get_v12_scores(df):
-    """Logic V12 Elite: Đếm số lượng, phân loại Tướng, tính điểm"""
     elite_scores = {}
     count = 0
-    # Lọc cột dữ liệu M... (M1-M4...) có độ dài < 5 (để tránh nhầm M10)
     data_cols = [c for c in df.columns if c.startswith('M') and len(c) < 5]
-    
     for idx, row in df.iterrows():
-        # Kiểm tra dòng có dữ liệu số không (>= 10 số 2 chữ số)
         row_str = str(row.values)
         if len(re.findall(r'\b\d{2}\b', row_str)) < 10: continue
-    
         count += 1
         weight = 0
-        if count <= 5: weight = 10    # Top 5 Đại tướng
-        elif count <= 20: weight = 5  # Top 6-20 Trung tướng
-        else: break # Chỉ lấy Top 20
-        
+        if count <= 5: weight = 10    
+        elif count <= 20: weight = 5 
+        else: break 
         for c in data_cols:
             if c not in row: continue
             nums = k55_parse_numbers(row[c])
@@ -205,10 +197,8 @@ def get_v12_scores(df):
     return elite_scores
 
 def get_k55_scores(df):
-    """Logic K55 Heatmap: Trọng số cột M + Phong độ 9X0X"""
     heat_scores = {}
     col_map = {}
-    # Trọng số cứng theo thuật toán gốc
     for c in df.columns:
         w = 0
         if c == 'M10': w = 100
@@ -222,103 +212,149 @@ def get_k55_scores(df):
         elif c == 'M2': w = 20
         elif c == 'M1': w = 10
         if w > 0: col_map[c] = w
-    
-    # Tìm cột điểm tích lũy 9X0X (Phong độ)
     score_col = next((c for c in df.columns if '9X0X' in c and 'TV' not in c), None)
-    
     for idx, row in df.iterrows():
         player_power = 1.0
         if score_col and pd.notna(row[score_col]):
             try: player_power = float(row[score_col]) / 100 
             except: player_power = 1.0
-            
         for col_name, weight in col_map.items():
             if col_name not in row: continue
             nums = k55_parse_numbers(row[col_name])
             for n in nums:
-                # Công thức Heatmap: Điểm vị trí * Phong độ
                 heat_scores[n] = heat_scores.get(n, 0) + (weight * player_power)
-                
     return heat_scores
 
 def calculate_k55_integrated(target_date, cache, kq_db, k55_limit):
-    """Hàm wrapper để chạy K55 từ Dataframe trong Cache của App"""
-    if target_date not in cache:
-        return [], "No Data"
-    
+    if target_date not in cache: return [], "No Data"
     df = cache[target_date]['df']
-    
-    # Lấy KQ hôm trước để làm 'LAST_RESULT' (Logic số rơi)
     last_res_val = None
     prev_date = target_date - timedelta(days=1)
     if prev_date not in kq_db:
-         # Thử tìm lùi 3 ngày
          for i in range(2, 4):
              if (target_date - timedelta(days=i)) in kq_db:
-                 prev_date = target_date - timedelta(days=i)
-                 break
-    if prev_date in kq_db:
-        last_res_val = kq_db[prev_date]
-
-    # 1. Chạy 2 luồng tư duy
+                 prev_date = target_date - timedelta(days=i); break
+    if prev_date in kq_db: last_res_val = kq_db[prev_date]
     scores_v12 = get_v12_scores(df)
     scores_k55 = get_k55_scores(df)
-    
-    # 2. Hợp nhất điểm số (Normalization & Fusion)
     max_v12 = max(scores_v12.values()) if scores_v12 else 1
     max_k55 = max(scores_k55.values()) if scores_k55 else 1
-    
     final_scores = {}
     all_nums = set(scores_v12.keys()) | set(scores_k55.keys())
-    
     for n in all_nums:
         s1 = (scores_v12.get(n, 0) / max_v12) * 100 
         s2 = (scores_k55.get(n, 0) / max_k55) * 100 
-        
-        # CÔNG THỨC LAI TẠO: 40% Elite + 60% Heatmap
         base_score = (s1 * 0.4) + (s2 * 0.6)
         bonus = 0
-        if s1 > 0 and s2 > 0: bonus = 20 # Thưởng giao thoa
-        
+        if s1 > 0 and s2 > 0: bonus = 20 
         final_scores[n] = base_score + bonus
-
-    # 3. Xếp hạng và chọn lọc
     ranked_final = sorted(final_scores.keys(), key=lambda x: (-final_scores[x], x))
-    
-    # Lấy Top theo config (Default 56)
     hybrid_set = ranked_final[:k55_limit]
-    
-    # Check Số Rơi (Logic bắt buộc của K55)
     if last_res_val and last_res_val not in hybrid_set and hybrid_set:
         hybrid_set[-1] = last_res_val 
-        
     hybrid_set.sort()
     return hybrid_set, None
 
 # ==============================================================================
-# 4. CORE LOGIC V25 (GIỮ NGUYÊN)
+# 4. MODULE SMART 58 (100% LOGIC PRESERVED)
+# ==============================================================================
+
+def smart58_get_weighted_numbers(row):
+    """Trích xuất số với trọng số M10=50, M9=25..."""
+    weighted_nums = {}
+    m_cols = [c for c in row.index if str(c).strip().upper().startswith('M') and len(str(c)) < 5]
+    for col in m_cols:
+        col_name = str(col).strip().upper()
+        digits = re.findall(r'\d+', col_name)
+        if not digits: continue
+        k = int(digits[0])
+        weight = k
+        if k == 10: weight = 50
+        elif k == 9: weight = 25
+        elif k == 8: weight = 15
+        
+        val = row[col]
+        if pd.notna(val):
+            nums = re.split(r'[,\s;]+', str(val))
+            for n in nums:
+                n = n.strip()
+                if n.isdigit():
+                    fn = f"{int(n):02d}"
+                    weighted_nums[fn] = max(weighted_nums.get(fn, 0), weight)
+    return weighted_nums
+
+def smart58_calc_streak(row, hist_map_sorted):
+    """Tính chuỗi thắng (x)"""
+    streak = 0
+    for col_name in hist_map_sorted:
+        if col_name not in row: continue
+        val = str(row[col_name]).strip().lower()
+        if 'x' == val: streak += 1
+        elif 'xịt' in val or val in ['nan', '', '0', 'miss']: break
+        else: break
+    return streak
+
+def calculate_smart58(target_date, cache, limit):
+    if target_date not in cache: return [], "No Data"
+    data = cache[target_date]
+    df = data['df']
+    hist_map = data['hist_map']
+    
+    past_dates = sorted([d for d in hist_map.keys() if d < target_date], reverse=True)
+    past_cols = [hist_map[d] for d in past_dates]
+    
+    score_col = next((c for c in df.columns if 'Đ' in c.upper() or '9X' in c.upper()), None)
+    
+    player_list = []
+    
+    for idx, row in df.iterrows():
+        name_val = str(row.values[0]) if len(row.values) > 0 else ""
+        if len(name_val) < 2 or name_val.isdigit() or any(x in name_val.upper() for x in ['KQ', 'TV TOP', 'THỐNG KÊ', 'NAN']):
+            continue
+            
+        streak = smart58_calc_streak(row, past_cols)
+        f_score = 0
+        if score_col and pd.notna(row[score_col]):
+            try: f_score = float(str(row[score_col]).replace(',', '').replace(' ', ''))
+            except: f_score = 0
+            
+        player_list.append({'row': row, 'streak': streak, 'f_score': f_score})
+        
+    if not player_list: return [], "No valid players"
+
+    ranked = sorted(player_list, key=lambda x: (-x['streak'], -x['f_score']))
+    top_15 = ranked[:15]
+    
+    agg_scores = {}
+    for entry in top_15:
+        wn = smart58_get_weighted_numbers(entry['row'])
+        for n, w in wn.items():
+            agg_scores[n] = agg_scores.get(n, 0) + w
+            
+    final_items = sorted(agg_scores.items(), key=lambda x: (-x[1], int(x[0])))[:limit]
+    final_set = sorted([x[0] for x in final_items])
+    
+    return final_set, None
+
+# ==============================================================================
+# 5. CORE LOGIC V25 (GIỮ NGUYÊN)
 # ==============================================================================
 
 def calculate_v24_final(target_date, rolling_window, cache, kq_db, limits_config, min_votes, score_std, score_mod, use_inverse, manual_groups=None):
     if target_date not in cache: return None, "Chưa có dữ liệu ngày này."
     curr_data = cache[target_date]
     df = curr_data['df']
-    
     score_std_tuple = tuple(score_std.items())
     score_mod_tuple = tuple(score_mod.items())
-    
     prev_date = target_date - timedelta(days=1)
     if prev_date not in cache:
         for i in range(2, 4):
             if (target_date - timedelta(days=i)) in cache:
-                prev_date = target_date - timedelta(days=i)
-                break
-
+                prev_date = target_date - timedelta(days=i); break
     col_hist_used = curr_data['hist_map'].get(prev_date)
     if not col_hist_used and prev_date in cache:
         col_hist_used = cache[prev_date]['hist_map'].get(prev_date)
-    if not col_hist_used:
-        return None, f"Không tìm thấy cột dữ liệu ngày {prev_date.strftime('%d/%m')}."
+    if not col_hist_used: return None, f"Không tìm thấy cột dữ liệu ngày {prev_date.strftime('%d/%m')}."
 
     groups = [f"{i}x" for i in range(10)]
     stats_std = {g: {'wins': 0, 'ranks': []} for g in groups}
@@ -328,8 +364,7 @@ def calculate_v24_final(target_date, rolling_window, cache, kq_db, limits_config
         past_dates = []
         check_d = target_date - timedelta(days=1)
         while len(past_dates) < rolling_window:
-            if check_d in cache and check_d in kq_db:
-                past_dates.append(check_d)
+            if check_d in cache and check_d in kq_db: past_dates.append(check_d)
             check_d -= timedelta(days=1)
             if (target_date - check_d).days > 35: break 
 
@@ -339,24 +374,19 @@ def calculate_v24_final(target_date, rolling_window, cache, kq_db, limits_config
             sorted_dates = sorted([k for k in cache[d]['hist_map'].keys() if k < d], reverse=True)
             if sorted_dates: d_hist_col = cache[d]['hist_map'][sorted_dates[0]]
             if not d_hist_col: continue
-            
             kq = kq_db[d]
             d_score_std = {c: get_col_score(c, score_std_tuple) for c in d_df.columns if get_col_score(c, score_std_tuple) > 0}
             d_score_mod = {c: get_col_score(c, score_mod_tuple) for c in d_df.columns if get_col_score(c, score_mod_tuple) > 0}
-
             for g in groups:
                 try:
                     mask = d_df[d_hist_col].astype(str).apply(lambda x: re.sub(r'[^0-9X]', '', x.upper().replace('S','6'))) == g.upper()
                     mems = d_df[mask]
                 except: continue
-                
-                if mems.empty: 
-                    stats_std[g]['ranks'].append(999); continue
+                if mems.empty: stats_std[g]['ranks'].append(999); continue
                 
                 def get_top_nums_bt(members_df, pre_calc_p_map, pre_calc_s_map, top_n, min_v, inverse):
                     num_stats = {}
                     cols_in_scope = sorted(list(set(pre_calc_p_map.keys()) | set(pre_calc_s_map.keys())))
-                    
                     for _, r in members_df.iterrows():
                         processed_nums = set()
                         for col in cols_in_scope:
@@ -369,7 +399,6 @@ def calculate_v24_final(target_date, rolling_window, cache, kq_db, limits_config
                                 if col in pre_calc_p_map: num_stats[n]['p'] += pre_calc_p_map[col]
                                 if col in pre_calc_s_map: num_stats[n]['s'] += pre_calc_s_map[col]
                             processed_nums.update(nums)
-                    
                     for _, r in members_df.iterrows():
                         found_in_row = set()
                         for col in pre_calc_p_map:
@@ -377,7 +406,6 @@ def calculate_v24_final(target_date, rolling_window, cache, kq_db, limits_config
                                 for n in get_nums(r[col]): 
                                     if n in num_stats: found_in_row.add(n)
                         for n in found_in_row: num_stats[n]['v'] += 1
-
                     filtered = [n for n, s in num_stats.items() if s['v'] >= min_v]
                     if inverse: return sorted(filtered, key=lambda n: (-num_stats[n]['p'], -num_stats[n]['s'], int(n)))[:top_n]
                     else: return sorted(filtered, key=lambda n: (-num_stats[n]['p'], -num_stats[n]['v'], int(n)))[:top_n]
@@ -387,13 +415,11 @@ def calculate_v24_final(target_date, rolling_window, cache, kq_db, limits_config
                     stats_std[g]['wins'] += 1
                     stats_std[g]['ranks'].append(top80_std.index(kq) + 1)
                 else: stats_std[g]['ranks'].append(999)
-                
                 top86_mod = get_top_nums_bt(mems, d_score_mod, d_score_std, limits_config['mod'], min_votes, use_inverse)
                 if kq in top86_mod: stats_mod[g]['wins'] += 1
 
     top6_std = []
     best_mod_grp = ""
-    
     if not manual_groups:
         final_std = []
         for g, inf in stats_std.items(): 
@@ -412,7 +438,6 @@ def calculate_v24_final(target_date, rolling_window, cache, kq_db, limits_config
         num_stats = {}
         p_cols_dict = {c: get_col_score(c, p_map_t) for c in df.columns if get_col_score(c, p_map_t) > 0}
         s_cols_dict = {c: get_col_score(c, s_map_t) for c in df.columns if get_col_score(c, s_map_t) > 0}
-        
         for _, r in valid_mems.iterrows():
             all_cols = sorted(list(set(p_cols_dict.keys()).union(set(s_cols_dict.keys()))))
             processed = set()
@@ -425,7 +450,6 @@ def calculate_v24_final(target_date, rolling_window, cache, kq_db, limits_config
                     if col in p_cols_dict: num_stats[n]['p'] += p_cols_dict[col]
                     if col in s_cols_dict: num_stats[n]['s'] += s_cols_dict[col]
                 processed.update(get_nums(val))
-        
         for n in num_stats: num_stats[n]['v'] = 0
         for _, r in valid_mems.iterrows():
             found = set()
@@ -434,7 +458,6 @@ def calculate_v24_final(target_date, rolling_window, cache, kq_db, limits_config
                     for n in get_nums(r[col]): 
                         if n in num_stats: found.add(n)
             for n in found: num_stats[n]['v'] += 1
-            
         filtered = [n for n, s in num_stats.items() if s['v'] >= min_v]
         if inverse: sorted_res = sorted(filtered, key=lambda n: (-num_stats[n]['p'], -num_stats[n]['s'], int(n)))
         else: sorted_res = sorted(filtered, key=lambda n: (-num_stats[n]['p'], -num_stats[n]['v'], int(n)))
@@ -442,7 +465,6 @@ def calculate_v24_final(target_date, rolling_window, cache, kq_db, limits_config
 
     final_original = []
     final_modified = []
-
     if manual_groups:
         pool_std = []
         for g in manual_groups:
@@ -466,12 +488,9 @@ def calculate_v24_final(target_date, rolling_window, cache, kq_db, limits_config
         for g in [top6_std[1], top6_std[4], top6_std[2]]: 
             pool2.extend(list(get_group_set_final(g, score_std_tuple, score_mod_tuple, limits_std[g], min_votes, use_inverse)))
         s2 = {n for n, c in Counter(pool2).items() if c >= 2}
-        
         final_original = sorted(list(s1.intersection(s2)))
         final_modified = sorted(list(get_group_set_final(best_mod_grp, score_mod_tuple, score_std_tuple, limits_config['mod'], min_votes, use_inverse)))
-
     final_intersect = sorted(list(set(final_original).intersection(set(final_modified))))
-
     return {
         "top6_std": top6_std, "best_mod": best_mod_grp,
         "dan_goc": final_original, "dan_mod": final_modified,
@@ -483,10 +502,8 @@ def analyze_group_performance(start_date, end_date, cut_limit, score_map, data_c
     delta = (end_date - start_date).days + 1
     dates = [start_date + timedelta(days=i) for i in range(delta)]
     score_map_tuple = tuple(score_map.items())
-
     grp_stats = {f"{i}x": {'wins': 0, 'ranks': [], 'history': [], 'last_pred': []} for i in range(10)}
     detailed_rows = [] 
-    
     for d in reversed(dates):
         day_record = {"Ngày": d.strftime("%d/%m"), "KQ": kq_db.get(d, "N/A")}
         if d not in kq_db or d not in data_cache: 
@@ -495,31 +512,24 @@ def analyze_group_performance(start_date, end_date, cut_limit, score_map, data_c
                 grp_stats[g]['ranks'].append(999) 
                 day_record[g] = "-"
             detailed_rows.append(day_record); continue
-            
         curr_data = data_cache[d]
         df = curr_data['df']
         prev_date, hist_col_name = None, None
-        
         prev_date = d - timedelta(days=1)
         if prev_date not in data_cache: 
             for k in range(2, 4):
                 if (d - timedelta(days=k)) in data_cache: 
                      prev_date = d - timedelta(days=k); break
-        
-        if prev_date in data_cache:
-             hist_col_name = data_cache[d]['hist_map'].get(prev_date)
-        
+        if prev_date in data_cache: hist_col_name = data_cache[d]['hist_map'].get(prev_date)
         if not hist_col_name:
              for g in grp_stats: 
                  grp_stats[g]['history'].append(None)
                  grp_stats[g]['ranks'].append(999)
                  day_record[g] = "-"
              detailed_rows.append(day_record); continue
-          
         hist_series = df[hist_col_name].astype(str).apply(lambda x: re.sub(r'[^0-9X]', '', x.upper().replace('S','6')))
         kq = kq_db[d]
         p_cols_dict = {c: get_col_score(c, score_map_tuple) for c in df.columns if get_col_score(c, score_map_tuple) > 0}
-
         for g in grp_stats:
             mask = hist_series == g.upper()
             valid_mems = df[mask]
@@ -534,7 +544,6 @@ def analyze_group_performance(start_date, end_date, cut_limit, score_map, data_c
                         if n in processed: continue
                         num_stats[n]['p'] += pts
                     processed.update(get_nums(val))
-            
             for n in num_stats: num_stats[n]['v'] = 0
             for _, r in valid_mems.iterrows():
                 found = set()
@@ -543,14 +552,11 @@ def analyze_group_performance(start_date, end_date, cut_limit, score_map, data_c
                          for n in get_nums(r[col]): 
                              if n in num_stats: found.add(n)
                 for n in found: num_stats[n]['v'] += 1
-            
             filtered = [n for n, s in num_stats.items() if s['v'] >= min_v]
             if inverse: sorted_res = sorted(filtered, key=lambda n: (-num_stats[n]['p'], -num_stats[n]['p'], int(n)))
             else: sorted_res = sorted(filtered, key=lambda n: (-num_stats[n]['p'], -num_stats[n]['v'], int(n)))
-
             top_list = sorted_res[:cut_limit]
             top_set = set(top_list)
-            
             grp_stats[g]['last_pred'] = sorted(top_list)
             if kq in top_set:
                 grp_stats[g]['wins'] += 1
@@ -561,9 +567,7 @@ def analyze_group_performance(start_date, end_date, cut_limit, score_map, data_c
                 grp_stats[g]['ranks'].append(999) 
                 grp_stats[g]['history'].append("L")
                 day_record[g] = "MISS"
-            
         detailed_rows.append(day_record)
-            
     final_report = []
     for g, info in grp_stats.items():
         hist = info['history']
@@ -579,7 +583,6 @@ def analyze_group_performance(start_date, end_date, cut_limit, score_map, data_c
             else:
                 max_lose = max(max_lose, temp_lose); temp_lose = 0
         max_lose = max(max_lose, temp_lose)
-        
         final_report.append({
             "Nhóm": g, "Số ngày trúng": wins,
             "Tỉ lệ": f"{(wins/valid_days)*100:.1f}%" if valid_days > 0 else "0%",
@@ -590,7 +593,7 @@ def analyze_group_performance(start_date, end_date, cut_limit, score_map, data_c
     return df_rep, pd.DataFrame(detailed_rows)
 
 # ==============================================================================
-# 5. GIAO DIỆN CHÍNH
+# 6. GIAO DIỆN CHÍNH
 # ==============================================================================
 
 SCORES_PRESETS = {
@@ -662,12 +665,29 @@ def main():
             LIMIT_MODIFIED = st.number_input("Top 1 Modified lấy:", value=86)
 
         # --------------------------------------------------------
-        # NEW K55 CONFIG
+        # CUSTOM LIMITS
         # --------------------------------------------------------
         st.markdown("---")
-        with st.expander("🔥 Cấu hình K55 (Heart Map)", expanded=True):
-            K55_LIMIT = st.number_input("K55 Lấy bao nhiêu số?", min_value=10, max_value=90, value=56, help="Mặc định 56 số theo thuật toán gốc")
+        with st.expander("🔥 Cấu hình Số lượng", expanded=True):
+            K55_LIMIT = st.number_input("K55 lấy bao nhiêu số?", min_value=10, max_value=90, value=56)
+            SMART58_LIMIT = st.number_input("Smart 58 lấy bao nhiêu số?", min_value=10, max_value=90, value=58)
+        
         # --------------------------------------------------------
+        # DISPLAY OPTIONS (NEW)
+        # --------------------------------------------------------
+        st.markdown("---")
+        with st.expander("👁️ Tùy chọn hiển thị", expanded=True):
+            st.caption("Chọn bảng kết quả muốn xem:")
+            c_v1, c_v2 = st.columns(2)
+            with c_v1:
+                show_goc = st.checkbox("Dàn Gốc", value=True)
+                show_mod = st.checkbox("Dàn Mod", value=False)
+                show_f1 = st.checkbox("Final 1 (V25)", value=True)
+                show_f2 = st.checkbox("Final 2 (G+K55)", value=True)
+            with c_v2:
+                show_k55 = st.checkbox("K55 Heart", value=True)
+                show_s58 = st.checkbox("Smart 58", value=True)
+                show_f3 = st.checkbox("Final 3 (G+S58)", value=True)
 
         st.markdown("---")
         if st.button("🗑️ XÓA CACHE", type="primary"):
@@ -703,68 +723,92 @@ def main():
                 
                 if st.button("🚀 CHẠY", type="primary", use_container_width=True):
                     with st.spinner("Đang tính toán..."):
-                        # Run V25 Logic
+                        # 1. Run V25
                         grps = manual_selection if manual_mode else None
                         res, err = calculate_v24_final(target, ROLLING_WINDOW, data_cache, kq_db, limit_cfg, MIN_VOTES, custom_std, custom_mod, USE_INVERSE, grps)
                         
-                        # Run K55 Logic
+                        # 2. Run K55
                         k55_res, k55_err = calculate_k55_integrated(target, data_cache, kq_db, K55_LIMIT)
+
+                        # 3. Run Smart 58
+                        s58_res, s58_err = calculate_smart58(target, data_cache, SMART58_LIMIT)
 
                         if err: st.error(err)
                         else:
                             st.info(f"Phân nhóm theo ngày: {res['source_col']}")
-                            final_res_set = res['dan_final']
+                            
+                            # Prepare Data
+                            dan_goc = res['dan_goc']
+                            dan_mod = res['dan_mod']
+                            dan_f1 = res['dan_final']
                             if manual_mode:
-                                if manual_score_opt == "Chỉ Gốc": final_res_set = res['dan_goc']
-                                elif manual_score_opt == "Chỉ Mod": final_res_set = res['dan_mod']
+                                if manual_score_opt == "Chỉ Gốc": dan_f1 = dan_goc
+                                elif manual_score_opt == "Chỉ Mod": dan_f1 = dan_mod
 
-                            # Layout hiển thị: 4 Cột (Gốc, Mod, Final V25, K55)
-                            c1, c2, c3, c4 = st.columns(4)
-                            with c1:
-                                st.success(f"Gốc ({len(res['dan_goc'])})")
-                                st.text_area("Gốc", ",".join(res['dan_goc']), height=150, label_visibility="collapsed")
-                                if not manual_mode: st.caption(f"Top 6: {', '.join(res['top6_std'])}")
+                            # Calc Final 2 (Gốc + K55)
+                            dan_f2 = []
+                            if not k55_err:
+                                dan_f2 = sorted(list(set(dan_goc).intersection(set(k55_res))))
 
-                            with c2:
-                                st.warning(f"Mod ({len(res['dan_mod'])})")
-                                st.text_area("Mod", ",".join(res['dan_mod']), height=150, label_visibility="collapsed")
-                                if not manual_mode: st.caption(f"Best: {res['best_mod']}")
-                            
-                            with c3:
-                                st.error(f"FINAL V25 ({len(final_res_set)})")
-                                st.text_area("Final", ",".join(final_res_set), height=150, label_visibility="collapsed")
-                            
-                            with c4:
-                                # K55 Output
-                                if k55_err: st.write(k55_err)
-                                else:
-                                    st.info(f"🔥 K55 ({len(k55_res)})")
-                                    st.text_area("K55", ",".join(k55_res), height=150, label_visibility="collapsed")
-                                    st.caption("Hybrid Elite + Heatmap")
+                            # Calc Final 3 (Gốc + Smart 58)
+                            dan_f3 = []
+                            if not s58_err:
+                                dan_f3 = sorted(list(set(dan_goc).intersection(set(s58_res))))
 
+                            # --- DYNAMIC RENDERING ---
+                            cols_to_show = []
+                            if show_goc: cols_to_show.append({"t": f"Gốc ({len(dan_goc)})", "d": dan_goc, "k": "Goc"})
+                            if show_mod: cols_to_show.append({"t": f"Mod ({len(dan_mod)})", "d": dan_mod, "k": "Mod"})
+                            if show_f1:  cols_to_show.append({"t": f"Final 1 ({len(dan_f1)})", "d": dan_f1, "k": "F1"})
+                            if show_k55: cols_to_show.append({"t": f"K55 ({len(k55_res)})", "d": k55_res, "k": "K55"})
+                            if show_s58: cols_to_show.append({"t": f"Smart 58 ({len(s58_res)})", "d": s58_res, "k": "S58"})
+                            if show_f2:  cols_to_show.append({"t": f"F2 (G+K55): {len(dan_f2)}", "d": dan_f2, "k": "F2"})
+                            if show_f3:  cols_to_show.append({"t": f"F3 (G+S58): {len(dan_f3)}", "d": dan_f3, "k": "F3"})
+
+                            if cols_to_show:
+                                cols = st.columns(len(cols_to_show))
+                                for i, c_obj in enumerate(cols_to_show):
+                                    with cols[i]:
+                                        if "F2" in c_obj['t'] or "F3" in c_obj['t']: st.error(c_obj['t'])
+                                        else: st.caption(c_obj['t'])
+                                        st.text_area(c_obj['k'], ",".join(c_obj['d']), height=120, label_visibility="collapsed")
+                            else:
+                                st.warning("Bạn đã tắt hết các bảng hiển thị!")
+
+                            # Win/Loss Check
                             if target in kq_db:
                                 real = kq_db[target]
                                 st.markdown("---")
-                                msg_v25 = "WIN" if real in final_res_set else "MISS"
-                                msg_k55 = "WIN" if (not k55_err and real in k55_res) else "MISS"
+                                msg_map = {}
+                                if show_f1: msg_map["V25"] = "WIN" if real in dan_f1 else "MISS"
+                                if show_k55: msg_map["K55"] = "WIN" if (not k55_err and real in k55_res) else "MISS"
+                                if show_s58: msg_map["Smart58"] = "WIN" if (not s58_err and real in s58_res) else "MISS"
+                                if show_f2: msg_map["Final 2"] = "WIN" if real in dan_f2 else "MISS"
+                                if show_f3: msg_map["Final 3"] = "WIN" if real in dan_f3 else "MISS"
+
+                                if "WIN" in msg_map.values(): st.balloons()
                                 
-                                if msg_v25 == "WIN" or msg_k55 == "WIN": st.balloons()
-                                
-                                col_r1, col_r2 = st.columns(2)
-                                with col_r1:
-                                    if msg_v25 == "WIN": st.success(f"🎉 V25: **{real}** WIN!")
-                                    else: st.error(f"❌ V25: **{real}** MISS.")
-                                with col_r2:
-                                    if msg_k55 == "WIN": st.success(f"🔥 K55: **{real}** WIN!")
-                                    else: st.error(f"❌ K55: **{real}** MISS.")
+                                # Show Results row
+                                if msg_map:
+                                    r_cols = st.columns(len(msg_map))
+                                    for idx, (name, status) in enumerate(msg_map.items()):
+                                        with r_cols[idx]:
+                                            if status == "WIN": st.success(f"{name}: **{real}** WIN")
+                                            else: st.error(f"{name}: **{real}** MISS")
 
             with tab2:
                 st.subheader("Kiểm thử Backtest")
                 with st.expander("⚙️ Cấu hình Backtest", expanded=True):
                     c1, c2 = st.columns(2)
                     with c1: date_range = st.date_input("Khoảng ngày:", [last_d - timedelta(days=7), last_d])
-                    # Thêm Option K55 vào đây
-                    with c2: bt_mode = st.selectbox("Chế độ:", ["FINAL (Giao thoa)", "Dàn Gốc", "Dàn Mod", "K55 Hybrid"])
+                    with c2: bt_mode = st.selectbox("Chế độ:", [
+                        "Final 1 (Giao thoa Gốc+Mod)", 
+                        "Final 2 (Giao thoa Gốc+K55)", 
+                        "Final 3 (Giao thoa Gốc+Smart58)",
+                        "Smart 58 (Mới)", 
+                        "K55 Hybrid", 
+                        "Dàn Gốc"
+                    ])
                     btn_backtest = st.button("🔄 CHẠY BACKTEST", use_container_width=True, type="primary")
 
                 if btn_backtest:
@@ -781,17 +825,34 @@ def main():
                             if d not in kq_db: continue
                             
                             t_set = []
-                            # Logic Switch
-                            if bt_mode == "K55 Hybrid":
+                            # --- Logic Backtest ---
+                            if bt_mode == "Smart 58 (Mới)":
+                                s58_res, s58_err = calculate_smart58(d, data_cache, SMART58_LIMIT)
+                                if s58_err: continue
+                                t_set = s58_res
+
+                            elif bt_mode == "K55 Hybrid":
                                 k_res, k_err = calculate_k55_integrated(d, data_cache, kq_db, K55_LIMIT)
                                 if k_err: continue
                                 t_set = k_res
+
+                            elif bt_mode == "Final 2 (Giao thoa Gốc+K55)":
+                                res_v25, err_v25 = calculate_v24_final(d, ROLLING_WINDOW, data_cache, kq_db, limit_cfg, MIN_VOTES, custom_std, custom_mod, USE_INVERSE, None)
+                                k_res, k_err = calculate_k55_integrated(d, data_cache, kq_db, K55_LIMIT)
+                                if err_v25 or k_err: continue
+                                t_set = sorted(list(set(res_v25['dan_goc']).intersection(set(k_res))))
+                            
+                            elif bt_mode == "Final 3 (Giao thoa Gốc+Smart58)":
+                                res_v25, err_v25 = calculate_v24_final(d, ROLLING_WINDOW, data_cache, kq_db, limit_cfg, MIN_VOTES, custom_std, custom_mod, USE_INVERSE, None)
+                                s58_res, s58_err = calculate_smart58(d, data_cache, SMART58_LIMIT)
+                                if err_v25 or s58_err: continue
+                                t_set = sorted(list(set(res_v25['dan_goc']).intersection(set(s58_res))))
+
                             else:
                                 res, err = calculate_v24_final(d, ROLLING_WINDOW, data_cache, kq_db, limit_cfg, MIN_VOTES, custom_std, custom_mod, USE_INVERSE, None)
                                 if err: continue
-                                if "FINAL" in bt_mode: t_set = res['dan_final']
+                                if "Final 1" in bt_mode: t_set = res['dan_final']
                                 elif "Gốc" in bt_mode: t_set = res['dan_goc']
-                                elif "Mod" in bt_mode: t_set = res['dan_mod']
                             
                             real = kq_db[d]
                             logs.append({
@@ -830,21 +891,13 @@ def main():
                         with st.spinner("Đang xử lý..."):
                             s_map = custom_std if score_mode == "Gốc (Std)" else custom_mod
                             df_report, df_detail = analyze_group_performance(d_range_a[0], d_range_a[1], cut_val, s_map, data_cache, kq_db, MIN_VOTES, USE_INVERSE)
-                            
-                            st.write("📊 **Thống kê tổng hợp**")
-                            st.dataframe(df_report, use_container_width=True)
-                            
+                            st.write("📊 **Thống kê tổng hợp**"); st.dataframe(df_report, use_container_width=True)
                             st.write("📅 **Chi tiết từng ngày**")
                             def color_matrix(val):
                                 if val == "MISS": return 'background-color: #ffcccc; color: #cc0000; font-weight: bold;'
                                 elif val == "WIN": return 'background-color: #ccffcc; color: #006600; font-weight: bold;'
                                 return ''
-
-                            st.dataframe(
-                                df_detail.style.map(color_matrix), 
-                                use_container_width=True, height=600,
-                                column_config={"Ngày": st.column_config.TextColumn("Ngày", frozen=True)}
-                            )
+                            st.dataframe(df_detail.style.map(color_matrix), use_container_width=True, height=600, column_config={"Ngày": st.column_config.TextColumn("Ngày", frozen=True)})
                             st.caption("Ghi chú: 🟩 WIN | 🟥 MISS (Trượt)")
 
 if __name__ == "__main__":
