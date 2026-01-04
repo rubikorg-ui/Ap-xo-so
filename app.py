@@ -3,6 +3,7 @@ import pandas as pd
 import re
 import datetime
 import time
+import math
 from datetime import timedelta
 from collections import Counter
 from functools import lru_cache
@@ -11,14 +12,14 @@ from functools import lru_cache
 # 1. CẤU HÌNH HỆ THỐNG
 # ==============================================================================
 st.set_page_config(
-    page_title="Quang Pro V42 - Stable Core", 
+    page_title="Quang Pro V42 - Dynamic Hunter", 
     page_icon="🛡️", 
     layout="wide",
     initial_sidebar_state="collapsed" 
 )
 
 st.title("🛡️ Quang Handsome: V42 Stable Core")
-st.caption("🚀 Fix lỗi StreamlitAPIException | Callback System | Logic Gốc 100% | Hunter Pro AI")
+st.caption("🚀 Fix lỗi StreamlitAPIException | Callback System | Logic Gốc 100% | Hunter Dynamic AI")
 
 # Regex & Sets
 RE_NUMS = re.compile(r'\d+')
@@ -429,94 +430,177 @@ def analyze_group_performance(start_date, end_date, cut_limit, score_map, _cache
     return df_rep, pd.DataFrame(detailed_rows)
 
 # ==============================================================================
-# 3. AUTO-HUNTER PRO (NÂNG CẤP: DATA ANALYST LOGIC)
+# 3. AUTO-HUNTER PRO (NÂNG CẤP: DYNAMIC AI)
 # ==============================================================================
 
 def analyze_market_trends(target_date, _cache, _kq_db):
-    """Phân tích sâu dữ liệu: Tách biệt độ nóng (Hot) và độ bền (Stable)"""
-    SHORT_TERM = 4; LONG_TERM = 18
+    """Phân tích sâu dữ liệu: Trả về chi tiết để tính toán linh động"""
+    SHORT_TERM = 3; LONG_TERM = 18
     past_dates = []
     check_d = target_date - timedelta(days=1)
     while len(past_dates) < LONG_TERM:
         if check_d in _cache and check_d in _kq_db: past_dates.append(check_d)
         check_d -= timedelta(days=1)
         if (target_date - check_d).days > 60: break
-    if not past_dates: return [], []
+    if not past_dates: return {}, {}
 
     col_stats = {}
     for idx, d in enumerate(past_dates):
         df = _cache[d]['df']
         kq = _kq_db[d]
-        recency_weight = 1 / (0.1 * idx + 1) 
+        is_short = idx < SHORT_TERM
+        recency_weight = 1 / (0.15 * idx + 1) # Độ dốc cao hơn
+        
         for col in df.columns:
             clean_name = str(col).upper().replace(" ", "")
             if re.match(r'^M\d+$', clean_name):
                 if clean_name not in col_stats:
-                    col_stats[clean_name] = {'wins': 0, 'recency_score': 0.0}
+                    col_stats[clean_name] = {'wins': 0, 'recency_score': 0.0, 'short_wins': 0, 'last_seen': 99}
+                
+                # Check Win
                 all_vals = " ".join(df[col].astype(str).tolist())
-                if kq in get_nums(all_vals):
+                nums_in_col = get_nums(all_vals)
+                if kq in nums_in_col:
                     col_stats[clean_name]['wins'] += 1
                     col_stats[clean_name]['recency_score'] += recency_weight
+                    col_stats[clean_name]['last_seen'] = idx
+                    if is_short: col_stats[clean_name]['short_wins'] += 1
 
-    ranked_stable = sorted(col_stats.items(), key=lambda x: x[1]['wins'], reverse=True)
-    ranked_hot = sorted(col_stats.items(), key=lambda x: x[1]['recency_score'], reverse=True)
-    return ranked_stable, ranked_hot
+    return col_stats
 
-def create_distribution(cols_ranked, strategy_type):
+def create_dynamic_distribution(col_stats, strategy_type, top_k=None):
+    """
+    Tạo bộ điểm LINH ĐỘNG (Dynamic Scoring) dựa trên dữ liệu thực tế
+    Thay vì gán điểm cố định (50, 40), nó tính dựa trên tỷ lệ trúng.
+    """
     base_scores = {f"M{i}": 0 for i in range(11)}
-    top_cols = [x[0] for x in cols_ranked]
     
-    if strategy_type == "FIBONACCI":
+    # Lọc cột có dữ liệu
+    valid_items = [k for k in col_stats.items() if k[1]['wins'] > 0]
+    
+    # Sort theo tiêu chí riêng của từng chiến thuật
+    if "HOT" in strategy_type:
+        sorted_items = sorted(valid_items, key=lambda x: x[1]['recency_score'], reverse=True)
+    elif "RECOVERY" in strategy_type:
+        # Sóng hồi: Ít trúng gần đây nhưng tổng trúng cao (Vừa tỉnh ngủ)
+        # Sort by: Wins cao + Last seen xa (nhưng ko quá xa)
+        sorted_items = sorted(valid_items, key=lambda x: (x[1]['wins'] - x[1]['short_wins']*2), reverse=True)
+    else: # STABLE
+        sorted_items = sorted(valid_items, key=lambda x: x[1]['wins'], reverse=True)
+
+    if not sorted_items: return base_scores
+    if top_k: sorted_items = sorted_items[:top_k]
+    
+    top_cols = [x[0] for x in sorted_items]
+    
+    # --- LOGIC CHIA ĐIỂM ---
+    
+    if "PROPORTIONAL" in strategy_type:
+        # Chia theo Tỉ Lệ Thực: Anh trúng gấp đôi tôi, điểm anh gấp đôi tôi.
+        total_wins = sum([col_stats[c]['wins'] for c in top_cols])
+        if total_wins > 0:
+            for c in top_cols:
+                w = col_stats[c]['wins']
+                # Scale max 60 diem
+                score = int((w / total_wins) * 150) 
+                base_scores[c] = min(60, score)
+                
+    elif "LOGARITHMIC" in strategy_type:
+        # Làm mềm khoảng cách: Top 1 và Top 2 chênh nhau ít thôi
+        max_val = len(top_cols)
+        for i, c in enumerate(top_cols):
+            # Hàm giảm dần chậm
+            score = 55 - (15 * math.log(i + 1))
+            base_scores[c] = int(max(0, score))
+
+    elif "EXPONENTIAL" in strategy_type:
+        # Phân cực mạnh: Top 1 ăn hết
+        for i, c in enumerate(top_cols):
+            score = 60 * (0.6 ** i) # Giảm cực nhanh: 60, 36, 21, 12...
+            base_scores[c] = int(score)
+
+    elif "FIBONACCI" in strategy_type:
         weights = [55, 34, 21, 13, 8, 5, 3, 2, 1, 1]
         for idx, w in enumerate(weights):
             if idx < len(top_cols): base_scores[top_cols[idx]] = w
-    elif strategy_type == "PARETO":
-        for idx in range(min(3, len(top_cols))): base_scores[top_cols[idx]] = 40
-        for idx in range(3, min(8, len(top_cols))): base_scores[top_cols[idx]] = 5
-    elif strategy_type == "LINEAR":
+            
+    elif "STEP_LADDER" in strategy_type:
+        # Điểm bậc thang đều: 50, 45, 40...
         curr = 50
-        for col in top_cols:
-            if curr <= 0: break
-            base_scores[col] = curr; curr -= 5
-    elif strategy_type == "SNIPER":
-        weights = [80, 40, 20, 10, 5]
-        for idx, w in enumerate(weights):
-            if idx < len(top_cols): base_scores[top_cols[idx]] = w
-    elif strategy_type == "TOP6_BALANCED":
-        for idx in range(min(6, len(top_cols))): base_scores[top_cols[idx]] = 25
-    elif strategy_type == "TOP2":
-        if len(top_cols) >= 1: base_scores[top_cols[0]] = 60
-        if len(top_cols) >= 2: base_scores[top_cols[1]] = 50
+        for c in top_cols:
+            base_scores[c] = curr
+            curr = max(0, curr - 5)
+
     return base_scores
 
-def generate_advanced_scenarios(ranked_stable, ranked_hot):
+def generate_dynamic_scenarios(col_stats):
     scenarios = []
-    scenarios.append({"Name": "🔥 Hot: Fibo Trend", "Desc": "Bắt dây đỏ theo dãy Fibonacci.", "Scores": create_distribution(ranked_hot, "FIBONACCI")})
-    scenarios.append({"Name": "🔥 Hot: Sniper Top 1", "Desc": "Tất tay vào cột Top 1 Hot nhất.", "Scores": create_distribution(ranked_hot, "SNIPER")})
-    scenarios.append({"Name": "🔥 Hot: Top 2 Gánh", "Desc": "Chỉ lấy 2 cột hot nhất làm trụ.", "Scores": create_distribution(ranked_hot, "TOP2")})
-    scenarios.append({"Name": "🛡️ Stable: Pareto 80/20", "Desc": "Tập trung 20% cột ổn định nhất.", "Scores": create_distribution(ranked_stable, "PARETO")})
-    scenarios.append({"Name": "🛡️ Stable: Linear", "Desc": "Rải điểm đều từ cao xuống thấp.", "Scores": create_distribution(ranked_stable, "LINEAR")})
-    scenarios.append({"Name": "🛡️ Stable: Top 6 Đều", "Desc": "Lấy 6 cột ổn định, điểm bằng nhau.", "Scores": create_distribution(ranked_stable, "TOP6_BALANCED")})
     
-    s_hybrid = {f"M{i}": 0 for i in range(11)}
-    if ranked_stable: s_hybrid[ranked_stable[0][0]] = 60
-    if ranked_hot: 
-        h_col = ranked_hot[0][0]; s_hybrid[h_col] = s_hybrid.get(h_col, 0) + 50
-        if len(ranked_hot) > 1: h_c2 = ranked_hot[1][0]; s_hybrid[h_c2] = s_hybrid.get(h_c2, 0) + 30
-    scenarios.append({"Name": "⚡ Hybrid: Vua Lì + Sao Mới", "Desc": "Kết hợp ổn định và hot trend.", "Scores": s_hybrid})
+    # 1. NHÓM HOT (Dành cho cầu đang chạy)
+    scenarios.append({
+        "Name": "🔥 Hot: Tỉ Lệ Thực (Proportional)",
+        "Desc": "Điểm số chia công bằng theo đúng % độ Hot. Top 1 Hot gấp đôi Top 2 thì điểm cũng gấp đôi.",
+        "Scores": create_dynamic_distribution(col_stats, "HOT_PROPORTIONAL", top_k=5)
+    })
+    scenarios.append({
+        "Name": "🔥 Hot: Sát Phạt (Exponential)",
+        "Desc": "Dồn 60% lực cho Top 1 Hot. Được ăn cả ngã về không.",
+        "Scores": create_dynamic_distribution(col_stats, "HOT_EXPONENTIAL", top_k=4)
+    })
+    scenarios.append({
+        "Name": "🔥 Hot: Fibonacci (Kinh điển)",
+        "Desc": "Chia điểm theo dãy số vàng Fibo (55, 34...). Cân bằng giữa Top 1 và Top 2.",
+        "Scores": create_dynamic_distribution(col_stats, "HOT_FIBONACCI", top_k=6)
+    })
+
+    # 2. NHÓM ỔN ĐỊNH (Dành cho cầu loạn)
+    scenarios.append({
+        "Name": "🛡️ Stable: Logarit (Mềm mại)",
+        "Desc": "San sẻ điểm cho Top 8 ổn định. Điểm giảm từ từ, dàn sẽ dày và an toàn.",
+        "Scores": create_dynamic_distribution(col_stats, "STABLE_LOGARITHMIC", top_k=8)
+    })
+    scenarios.append({
+        "Name": "🛡️ Stable: Bậc Thang (Linear)",
+        "Desc": "Top 10 ổn định, điểm giảm đều 5 đơn vị. Phổ thông nhất.",
+        "Scores": create_dynamic_distribution(col_stats, "STABLE_STEP_LADDER", top_k=10)
+    })
     
-    scenarios.append({"Name": "📦 Default: Gốc", "Desc": "Cấu hình chuẩn phòng khi nhiễu.", "Scores": {'M10': 50, 'M9': 30, 'M8': 25, 'M7': 20, 'M6': 15, 'M5': 10, 'M4': 5, 'M3':0, 'M2':0, 'M1':0, 'M0':0}})
+    # 3. NHÓM ĐẶC BIỆT (Special Ops)
+    scenarios.append({
+        "Name": "📈 Sóng Hồi (Recovery)",
+        "Desc": "Bắt các cột 'Cựu Vương': Từng trúng nhiều nhưng vừa xịt 2-3 hôm, giờ dễ nổ lại.",
+        "Scores": create_dynamic_distribution(col_stats, "RECOVERY_PROPORTIONAL", top_k=5)
+    })
+    
+    # 4. HYBRID (Lai tạo)
+    # Lấy Top 1 Hot (Fibo) + Top 1 Stable (Logarit)
+    s_hot = create_dynamic_distribution(col_stats, "HOT_FIBONACCI", top_k=3)
+    s_stable = create_dynamic_distribution(col_stats, "STABLE_LOGARITHMIC", top_k=5)
+    s_hybrid = {k: max(s_hot.get(k,0), s_stable.get(k,0)) for k in s_hot} # Merge max
+    # Fill remaining from stable
+    for k, v in s_stable.items():
+        if k not in s_hybrid: s_hybrid[k] = v
+            
+    scenarios.append({
+        "Name": "⚡ Hybrid: Max Ping",
+        "Desc": "Lấy điểm cao nhất giữa phe Hot và phe Stable. Công thủ toàn diện.",
+        "Scores": s_hybrid
+    })
+    
+    # Default
+    scenarios.append({"Name": "📦 Default: Gốc", "Desc": "Cấu hình chuẩn M10-M0.", "Scores": {'M10': 50, 'M9': 30, 'M8': 25, 'M7': 20, 'M6': 15, 'M5': 10, 'M4': 5, 'M3':0, 'M2':0, 'M1':0, 'M0':0}})
+
     return scenarios
 
 def hunt_best_scenario(target_date, _cache, _kq_db, fixed_limits, min_v, use_inv, max_allowed_nums, progress_bar=None, status_text=None):
-    if status_text: status_text.text("📊 Bước 1/3: Phân tích độ nóng & ổn định...")
-    ranked_stable, ranked_hot = analyze_market_trends(target_date, _cache, _kq_db)
+    if status_text: status_text.text("📊 Bước 1/3: Phân tích Dữ Liệu Động (Dynamic Data)...")
+    col_stats = analyze_market_trends(target_date, _cache, _kq_db)
     
-    if not ranked_stable and status_text:
+    if not col_stats and status_text:
         status_text.warning("⚠️ Dữ liệu ít. Dùng dummy.")
-        ranked_stable = [('M10', {'wins': 1})]; ranked_hot = [('M10', {'recency_score': 1})]
+        col_stats = {'M10': {'wins': 5, 'recency_score': 2.0, 'short_wins': 1, 'last_seen': 0}}
 
-    scenarios = generate_advanced_scenarios(ranked_stable, ranked_hot)
+    scenarios = generate_dynamic_scenarios(col_stats)
     total_steps = len(scenarios)
     results = []
     
@@ -539,8 +623,8 @@ def hunt_best_scenario(target_date, _cache, _kq_db, fixed_limits, min_v, use_inv
                 total_nums += len(t); valid += 1
         if valid > 0:
             avg = total_nums / valid; wr = (wins / valid) * 100
-            eff_score = wr - (avg * 0.4) 
-            if avg <= max_allowed_nums + 2:
+            eff_score = wr - (avg * 0.45) # Phạt nặng hơn chút nếu số quá nhiều
+            if avg <= max_allowed_nums + 3:
                 results.append({"Name": sc['Name'], "Desc": sc['Desc'], "WinRate": wr, "AvgNums": avg, "EffScore": eff_score, "Scores": sc['Scores']})
     
     if status_text: status_text.text("✅ Hoàn tất!")
@@ -719,8 +803,8 @@ def main():
                         st.dataframe(df_detail, use_container_width=True)
 
             with tab4:
-                st.subheader("🏹 Săn Kịch Bản (Auto-Hunter AI)")
-                st.info("AI Data Analyst: Phân tích xu hướng (Hot/Stable) và áp dụng chiến thuật toán học (Fibonacci, Pareto...).")
+                st.subheader("🏹 Săn Kịch Bản (Dynamic AI)")
+                st.info("AI sử dụng thuật toán Proportional & Logarithmic để chia điểm theo sát thực tế.")
                 
                 c1, c2 = st.columns([1, 2])
                 with c1:
