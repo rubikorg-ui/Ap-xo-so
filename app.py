@@ -10,14 +10,14 @@ from functools import lru_cache
 # 1. CẤU HÌNH HỆ THỐNG & UI
 # ==============================================================================
 st.set_page_config(
-    page_title="Quang Pro V32 - Ultimate Final", 
+    page_title="Quang Pro V33 - Final Stable", 
     page_icon="🎯", 
     layout="wide",
     initial_sidebar_state="collapsed" 
 )
 
-st.title("🎯 Quang Handsome: V32 Ultimate Custom")
-st.caption("🚀 Final 9 | MT VIP (Safe Mode) | MN Restored | Logic Reset Fixed")
+st.title("🎯 Quang Handsome: V33 Ultimate Custom")
+st.caption("🚀 Final 10 | Re-Analyzed MT (Stable) | MN Standard | Fix Overfitting")
 
 # Regex & Sets
 RE_NUMS = re.compile(r'\d+')
@@ -601,14 +601,16 @@ SCORES_PRESETS = {
         "L_STD": 80, "L_MOD": 86, "ROLLING": 10, 
         "L34": 65, "L56": 60
     },
-    "MT (AI Optimized - Safe)": {
-        "STD": [95, 80, 40, 50, 15, 85, 5, 55, 25, 80, 75], 
-        "MOD": [25, 100, 20, 5, 60, 95, 35, 75, 85, 60, 100],
-        "L_STD": 82, "L_MOD": 78, "ROLLING": 12, # Đã nới rộng biên độ để an toàn
-        "L34": 65, "L56": 58
+    "MT (MT 2026 - Phân tích lại)": {
+        # Đã nới rộng biên độ cắt (82/84) để tránh gãy
+        # Trọng số tập trung mạnh vào M8-M10
+        "STD": [0, 5, 5, 10, 15, 25, 30, 40, 50, 75, 100], 
+        "MOD": [5, 10, 15, 20, 30, 40, 50, 60, 80, 90, 100],
+        "L_STD": 82, "L_MOD": 84, "ROLLING": 10,
+        "L34": 65, "L56": 60
     },
     "MN (Miền Nam - Gốc)": { 
-        # Clone of Gốc standard (An toàn khi chưa có data)
+        # Giữ nguyên bản Gốc
         "STD": [0, 1, 2, 3, 4, 5, 6, 7, 15, 25, 50],
         "MOD": [0, 5, 10, 15, 30, 30, 50, 35, 25, 25, 40],
         "L_STD": 80, "L_MOD": 86, "ROLLING": 10, 
@@ -661,7 +663,7 @@ def main():
             st.selectbox(
                 "📚 Chọn bộ tham số mẫu:",
                 options=["Tùy chỉnh"] + list(SCORES_PRESETS.keys()),
-                index=1, # Default index
+                index=1, 
                 key="preset_choice",
                 on_change=update_scores
             )
