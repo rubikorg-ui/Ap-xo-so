@@ -10,14 +10,14 @@ from functools import lru_cache
 # 1. CẤU HÌNH HỆ THỐNG
 # ==============================================================================
 st.set_page_config(
-    page_title="Quang Pro V36 - Scenario Hunter", 
-    page_icon="🏹", 
+    page_title="Quang Pro V37 - Complete Arsenal", 
+    page_icon="🛡️", 
     layout="wide",
     initial_sidebar_state="collapsed" 
 )
 
-st.title("🏹 Quang Handsome: V36 Scenario Hunter")
-st.caption("🚀 AI phân tích Data -> Tạo 20 Kịch bản -> Backtest tìm ra cấu hình Vô Địch")
+st.title("🛡️ Quang Handsome: V37 Complete Arsenal")
+st.caption("🚀 Dự đoán Thủ công | Backtest | Matrix | Săn Kịch Bản (Đã Fix Lỗi)")
 
 # Regex & Sets
 RE_NUMS = re.compile(r'\d+')
@@ -27,7 +27,7 @@ RE_SLASH_DATE = re.compile(r'(\d{1,2})[\.\-/](\d{1,2})')
 BAD_KEYWORDS = frozenset(['N', 'NGHI', 'SX', 'XIT', 'MISS', 'TRUOT', 'NGHỈ', 'LỖI'])
 
 # ==============================================================================
-# 2. CORE FUNCTIONS (LOGIC GỐC - KHÔNG ĐỔI)
+# 2. CORE FUNCTIONS
 # ==============================================================================
 
 @lru_cache(maxsize=10000)
@@ -254,7 +254,7 @@ def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits
     stats_std = {g: {'wins': 0, 'ranks': []} for g in groups}
     stats_mod = {g: {'wins': 0} for g in groups}
 
-    # Backtest Phase
+    # --- PHASE 1: Backtest ---
     if not manual_groups:
         past_dates = []
         check_d = target_date - timedelta(days=1)
@@ -309,7 +309,7 @@ def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits
         top6_std = [x[0] for x in final_std[:6]]
         best_mod_grp = sorted(stats_mod.keys(), key=lambda g: (-stats_mod[g]['wins'], g))[0]
     
-    # Predict Phase
+    # --- PHASE 2: Predict ---
     hist_series = df[col_hist_used].astype(str).str.upper().replace('S', '6', regex=False)
     hist_series = hist_series.str.replace(r'[^0-9X]', '', regex=True)
     
@@ -369,6 +369,7 @@ def analyze_group_performance(start_date, end_date, cut_limit, score_map, _cache
     score_map_tuple = tuple(score_map.items())
     grp_stats = {f"{i}x": {'wins': 0, 'ranks': [], 'history': [], 'last_pred': []} for i in range(10)}
     detailed_rows = [] 
+    
     for d in reversed(dates):
         day_record = {"Ngày": d.strftime("%d/%m"), "KQ": _kq_db.get(d, "N/A")}
         if d not in _kq_db or d not in _cache: 
@@ -437,11 +438,10 @@ def analyze_group_performance(start_date, end_date, cut_limit, score_map, _cache
     return df_rep, pd.DataFrame(detailed_rows)
 
 # ==============================================================================
-# 5. SCENARIO HUNTER LOGIC
+# 5. SCENARIO HUNTER LOGIC (FIXED)
 # ==============================================================================
 
 def analyze_column_ranks(target_date, lookback, _cache, _kq_db):
-    """Phân tích xem cột nào hay trúng nhất"""
     past_dates = []
     check_d = target_date - timedelta(days=1)
     while len(past_dates) < lookback:
@@ -450,6 +450,8 @@ def analyze_column_ranks(target_date, lookback, _cache, _kq_db):
         if (target_date - check_d).days > 60: break
     
     col_hits = Counter()
+    if not past_dates: return []
+
     for d in past_dates:
         df = _cache[d]['df']
         kq = _kq_db[d]
@@ -458,53 +460,49 @@ def analyze_column_ranks(target_date, lookback, _cache, _kq_db):
             all_vals = " ".join(df[col].astype(str).tolist())
             if kq in get_nums(all_vals): col_hits[col] += 1
             
-    # Trả về danh sách cột đã sort: [('M10', 5), ('M5', 4)...]
     return col_hits.most_common()
 
 def generate_smart_scenarios(ranked_cols):
-    """Tạo ra 5 kịch bản thông minh từ Ranking"""
     scenarios = []
     
-    # 1. Kịch bản "Bám Top": Chỉ quan tâm Top 1 & 2
+    # 1. Bám Top 2
     s1 = {f"M{i}": 0 for i in range(11)}
     if len(ranked_cols) >= 2:
         s1[ranked_cols[0][0].replace(" ","")] = 60
         s1[ranked_cols[1][0].replace(" ","")] = 40
-    scenarios.append(("Bám Top 2", s1))
+    scenarios.append(("Bám Top 2 (Hot)", s1))
     
-    # 2. Kịch bản "Dàn Trải Top": Top 5 cột
+    # 2. Top 5 Phân Bố
     s2 = {f"M{i}": 0 for i in range(11)}
     weights = [50, 40, 30, 20, 10]
     for idx, (col, _) in enumerate(ranked_cols[:5]):
-        s2[col.replace(" ","")] = weights[idx]
+        if idx < len(weights): s2[col.replace(" ","")] = weights[idx]
     scenarios.append(("Top 5 Phân Bố", s2))
     
-    # 3. Kịch bản "An Toàn": Top 8
+    # 3. Top 8 An Toàn
     s3 = {f"M{i}": 0 for i in range(11)}
     for idx, (col, _) in enumerate(ranked_cols[:8]):
-        s3[col.replace(" ","")] = 20 # Điểm đều nhau
+        s3[col.replace(" ","")] = 20
     scenarios.append(("Top 8 An Toàn", s3))
     
-    # 4. Kịch bản "Gánh Team": Chỉ Top 1 gánh hết
+    # 4. Top 1 Gánh Team
     s4 = {f"M{i}": 0 for i in range(11)}
     if len(ranked_cols) >= 1:
         s4[ranked_cols[0][0].replace(" ","")] = 100
     scenarios.append(("Top 1 Gánh Team", s4))
-    
+
     return scenarios
 
 def hunt_best_scenario(target_date, _cache, _kq_db, fixed_limits, min_v, use_inv, max_allowed_nums):
-    # 1. Phân tích Rank
+    # Phân tích 15 ngày
     ranked = analyze_column_ranks(target_date, 15, _cache, _kq_db)
     if not ranked: return []
     
-    # 2. Tạo Kịch Bản
+    # Tạo kịch bản
     scenarios = generate_smart_scenarios(ranked)
     
-    # 3. Backtest từng kịch bản
     results = []
-    
-    # Lấy 5 ngày gần nhất để test
+    # Test 5 ngày gần nhất
     test_dates = []
     check = target_date - timedelta(days=1)
     while len(test_dates) < 5:
@@ -517,6 +515,7 @@ def hunt_best_scenario(target_date, _cache, _kq_db, fixed_limits, min_v, use_inv
         total_nums = 0
         valid = 0
         for d in test_dates:
+            # Dùng logic gốc, limits cố định từ sidebar
             res = calculate_v24_logic_only(d, 3, _cache, _kq_db, fixed_limits, min_v, score_set, score_set, use_inv, None)
             if res:
                 t = res['dan_final']
@@ -527,6 +526,7 @@ def hunt_best_scenario(target_date, _cache, _kq_db, fixed_limits, min_v, use_inv
         if valid > 0:
             avg = total_nums / valid
             wr = (wins / valid) * 100
+            # Filter số lượng
             if 5 <= avg <= max_allowed_nums:
                 results.append({
                     "Name": name, "WinRate": wr, "AvgNums": avg, "Scores": score_set
@@ -609,52 +609,33 @@ def main():
             limit_cfg = {'l12': L_TOP_12, 'l34': L_TOP_34, 'l56': L_TOP_56, 'mod': LIMIT_MODIFIED}
             last_d = max(data_cache.keys())
             
-            # --- CẤU TRÚC TAB ---
-            tab1, tab2, tab3 = st.tabs(["🏹 SCENARIO HUNTER", "🔙 BACKTEST", "🔍 MATRIX"])
+            tab1, tab2, tab3, tab4 = st.tabs(["📊 DỰ ĐOÁN", "🔙 BACKTEST", "🔍 MATRIX", "🏹 SĂN KỊCH BẢN"])
             
             with tab1:
-                st.subheader("Săn Kịch Bản Tối Ưu")
+                st.subheader("Dự đoán thủ công (Final 1)")
+                c_d1, c_d2 = st.columns([1, 1])
+                with c_d1: target = st.date_input("Ngày:", value=last_d)
                 
-                c1, c2 = st.columns([1, 2])
-                with c1:
-                    target = st.date_input("Ngày:", value=last_d)
-                    max_nums = st.slider("Max Số Lượng:", 40, 80, 65)
-                    if st.button("🏹 SĂN KỊCH BẢN (AUTO)", type="primary"):
-                        with st.spinner("AI đang phân tích & đấu giải 20 kịch bản..."):
-                            best_scenarios = hunt_best_scenario(target, data_cache, kq_db, limit_cfg, MIN_VOTES, USE_INVERSE, max_nums)
-                            st.session_state['best_scenarios'] = best_scenarios
-                
-                with c2:
-                    if 'best_scenarios' in st.session_state and st.session_state['best_scenarios']:
-                        scenarios = st.session_state['best_scenarios']
-                        st.success(f"Tìm thấy {len(scenarios)} kịch bản tiềm năng!")
-                        
-                        for idx, sc in enumerate(scenarios):
-                            with st.expander(f"🏅 #{idx+1}: {sc['Name']} | Win {sc['WinRate']:.0f}% | TB {sc['AvgNums']:.1f} số", expanded=(idx==0)):
-                                st.json(sc['Scores'])
-                                if st.button(f"👉 Áp dụng #{idx+1}", key=f"apply_{idx}"):
-                                    for k, v in sc['Scores'].items():
-                                        st.session_state[f'std_{k[1:]}'] = v
-                                        st.session_state[f'mod_{k[1:]}'] = v
-                                    st.success("Đã áp dụng! Hãy bấm 'Chạy Phân Tích' bên dưới.")
-                                    st.rerun()
-                    else:
-                        st.info("Bấm nút 'SĂN KỊCH BẢN' để AI làm việc.")
+                if st.button("🚀 CHẠY PHÂN TÍCH", type="primary", use_container_width=True):
+                    with st.spinner("Đang tính toán..."):
+                        res, err = calculate_v24_final(target, ROLLING_WINDOW, data_cache, kq_db, limit_cfg, MIN_VOTES, custom_std, custom_mod, USE_INVERSE, None)
+                        st.session_state['run_result'] = {'res': res, 'err': err, 'target': target}
 
-                st.markdown("---")
-                if st.button("🚀 CHẠY PHÂN TÍCH (Với điểm hiện tại)", use_container_width=True):
-                    res, err = calculate_v24_final(target, ROLLING_WINDOW, data_cache, kq_db, limit_cfg, MIN_VOTES, custom_std, custom_mod, USE_INVERSE, None)
-                    if not err:
-                        st.success(f"Final 1: {len(res['dan_final'])} số")
-                        st.text_area("Kết quả:", ",".join(res['dan_final']))
+                if 'run_result' in st.session_state and st.session_state['run_result']['target'] == target:
+                    rr = st.session_state['run_result']
+                    res = rr['res']
+                    if not rr['err']:
+                        st.success(f"Phân nhóm nguồn: {res['source_col']}")
+                        st.caption(f"Số lượng dàn: {len(res['dan_final'])} số")
+                        st.text_area("Final 1:", ",".join(res['dan_final']), height=100)
+                        st.info(f"🏆 Top 6 Gốc: {', '.join(res['top6_std'])}\n\n🌟 Best Mod: {res['best_mod']}")
                         if target in kq_db:
                             real = kq_db[target]
                             if real in res['dan_final']: st.balloons(); st.success(f"WIN {real}")
                             else: st.error(f"MISS {real}")
 
             with tab2:
-                # Backtest (Giữ nguyên logic cũ)
-                st.write("Backtest Module (Final 1)")
+                st.subheader("Backtest (Kiểm chứng)")
                 d_range = st.date_input("Khoảng ngày:", [last_d - timedelta(days=7), last_d])
                 if st.button("Chạy Backtest"):
                     start, end = d_range[0], d_range[1]
@@ -674,9 +655,52 @@ def main():
                         st.dataframe(df_log, use_container_width=True)
 
             with tab3:
-                # Matrix (Giữ nguyên)
-                st.write("Matrix Module")
-                # (Code Matrix cũ...)
+                st.subheader("Phân Tích Matrix")
+                with st.expander("⚙️ Cấu hình", expanded=True):
+                    c_a1, c_a2 = st.columns(2)
+                    with c_a1: d_range_a = st.date_input("Thời gian:", [last_d - timedelta(days=15), last_d], key="dr_a")
+                    with c_a2: 
+                        cut_val = st.number_input("Cắt Top:", value=60, step=5, key="cut_mtx")
+                        score_mode = st.radio("Hệ điểm:", ["Gốc (Std)", "Modified"], horizontal=True)
+                    btn_scan = st.button("🔎 QUÉT MATRIX", use_container_width=True)
+                
+                if btn_scan:
+                    with st.spinner("Đang xử lý..."):
+                        s_map = custom_std if score_mode == "Gốc (Std)" else custom_mod
+                        df_report, df_detail = analyze_group_performance(d_range_a[0], d_range_a[1], cut_val, s_map, data_cache, kq_db, MIN_VOTES, USE_INVERSE)
+                        st.dataframe(df_report, use_container_width=True)
+                        st.dataframe(df_detail, use_container_width=True)
+
+            with tab4:
+                st.subheader("🏹 Săn Kịch Bản Tối Ưu")
+                st.info("AI tự động phân tích tần suất trúng 15 ngày qua, tạo ra các chiến thuật (Bám Top, An Toàn...) và chọn cái tốt nhất.")
+                
+                c1, c2 = st.columns([1, 2])
+                with c1:
+                    target_hunter = st.date_input("Ngày:", value=last_d, key="t_hunter")
+                    max_nums_hunter = st.slider("Max Số Lượng:", 40, 80, 65, key="mx_hunter")
+                    if st.button("🏹 BẮT ĐẦU SĂN", type="primary"):
+                        with st.spinner("Đang đấu giải các kịch bản..."):
+                            best_scenarios = hunt_best_scenario(target_hunter, data_cache, kq_db, limit_cfg, MIN_VOTES, USE_INVERSE, max_nums_hunter)
+                            st.session_state['best_scenarios'] = best_scenarios
+                
+                with c2:
+                    if 'best_scenarios' in st.session_state and st.session_state['best_scenarios']:
+                        scenarios = st.session_state['best_scenarios']
+                        if not scenarios:
+                            st.warning("Không tìm thấy kịch bản nào phù hợp tiêu chí số lượng.")
+                        else:
+                            st.success(f"Tìm thấy {len(scenarios)} kịch bản tiềm năng!")
+                            for idx, sc in enumerate(scenarios):
+                                with st.expander(f"🏅 #{idx+1}: {sc['Name']} | Win {sc['WinRate']:.0f}% | TB {sc['AvgNums']:.1f} số", expanded=(idx==0)):
+                                    st.write("Bộ điểm đề xuất:")
+                                    st.json(sc['Scores'])
+                                    if st.button(f"👉 Áp dụng #{idx+1}", key=f"apply_{idx}"):
+                                        for k, v in sc['Scores'].items():
+                                            st.session_state[f'std_{k[1:]}'] = v
+                                            st.session_state[f'mod_{k[1:]}'] = v
+                                        st.success("Đã áp dụng! Hãy quay lại Tab 'Dự Đoán'.")
+                                        st.rerun()
 
 if __name__ == "__main__":
     main()
