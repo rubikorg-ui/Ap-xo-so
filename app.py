@@ -2,24 +2,25 @@ import streamlit as st
 import pandas as pd
 import re
 import datetime
+import time
 from datetime import timedelta
 from collections import Counter
 from functools import lru_cache
 
 # ==============================================================================
-# 1. CẤU HÌNH HỆ THỐNG & UI
+# 1. CẤU HÌNH HỆ THỐNG
 # ==============================================================================
 st.set_page_config(
-    page_title="Quang Pro V38 - Mobile Master", 
-    page_icon="📱", 
+    page_title="Quang Pro V40 - Classic Restore", 
+    page_icon="👑", 
     layout="wide",
     initial_sidebar_state="collapsed" 
 )
 
-st.title("📱 Quang Handsome: V38 Mobile Master")
-st.caption("🚀 Full Option | Auto-Hunter Fix | Logic Original 100%")
+st.title("👑 Quang Handsome: V40 Classic Restore")
+st.caption("🚀 Giao diện Cổ điển (3 Bảng) | Backtest Chi tiết | Săn Kịch Bản")
 
-# Regex & Sets (Core Logic)
+# Regex & Sets
 RE_NUMS = re.compile(r'\d+')
 RE_CLEAN_SCORE = re.compile(r'[^A-Z0-9]')
 RE_ISO_DATE = re.compile(r'(20\d{2})[\.\-/](\d{1,2})[\.\-/](\d{1,2})')
@@ -27,7 +28,7 @@ RE_SLASH_DATE = re.compile(r'(\d{1,2})[\.\-/](\d{1,2})')
 BAD_KEYWORDS = frozenset(['N', 'NGHI', 'SX', 'XIT', 'MISS', 'TRUOT', 'NGHỈ', 'LỖI'])
 
 # ==============================================================================
-# 2. CÁC HÀM XỬ LÝ DỮ LIỆU (CORE - KHÔNG ĐỔI)
+# 2. CORE FUNCTIONS
 # ==============================================================================
 
 @lru_cache(maxsize=10000)
@@ -81,11 +82,12 @@ def find_header_row(df_preview):
 
 def extract_meta_from_filename(filename):
     clean_name = filename.upper().replace(".CSV", "").replace(".XLSX", "")
+    clean_name = re.sub(r'\s*-\s*', '-', clean_name) 
     y_match = re.search(r'202[0-9]', clean_name)
     y_global = int(y_match.group(0)) if y_match else datetime.datetime.now().year
     m_match = re.search(r'(?:THANG|THÁNG|T)[^0-9]*(\d{1,2})', clean_name)
     m_global = int(m_match.group(1)) if m_match else 12
-    full_date_match = re.search(r'[\s\-](\d{1,2})[\.\-](\d{1,2})(?:[\.\-]20\d{2})?$', clean_name)
+    full_date_match = re.search(r'(\d{1,2})[\.\-](\d{1,2})(?:[\.\-]20\d{2})?', clean_name)
     if full_date_match:
         try:
             d = int(full_date_match.group(1))
@@ -94,10 +96,10 @@ def extract_meta_from_filename(filename):
             if m == 12 and m_global == 1: y -= 1 
             return m, y, datetime.date(y, m, d)
         except: pass
-    single_day_match = re.search(r'-\s*(\d{1,2})$', clean_name)
+    single_day_match = re.findall(r'(\d{1,2})$', clean_name)
     if single_day_match:
         try:
-            d = int(single_day_match.group(1))
+            d = int(single_day_match[-1])
             return m_global, y_global, datetime.date(y_global, m_global, d)
         except: pass
     return m_global, y_global, None
@@ -134,7 +136,6 @@ def load_data_v24(files):
                         df.columns = [str(c).strip().upper().replace('M 1 0', 'M10') for c in df.columns]
                         dfs_to_process.append((s_date, df))
                 file_status.append(f"✅ Excel: {file.name}")
-
             elif file.name.endswith('.csv'):
                 if not date_from_name: continue
                 try:
@@ -181,12 +182,7 @@ def load_data_v24(files):
             continue
     return cache, kq_db, file_status, err_logs
 
-# ==============================================================================
-# 3. TÍNH TOÁN LOGIC (GIỮ NGUYÊN 100% CÔNG THỨC)
-# ==============================================================================
-
 def fast_get_top_nums(df, p_map_dict, s_map_dict, top_n, min_v, inverse):
-    # Vectorized: Nhanh gấp 50 lần vòng lặp for
     cols_in_scope = list(set(p_map_dict.keys()) | set(s_map_dict.keys()))
     valid_cols = [c for c in cols_in_scope if c in df.columns]
     if not valid_cols or df.empty: return []
@@ -203,8 +199,6 @@ def fast_get_top_nums(df, p_map_dict, s_map_dict, top_n, min_v, inverse):
     s_nums = melted['Val'].astype(str).str.findall(r'\d+')
     exploded = melted.assign(Num=s_nums).explode('Num')
     exploded = exploded.dropna(subset=['Num'])
-    
-    # Fix 05 vs 5
     exploded['Num'] = exploded['Num'].str.strip().str.zfill(2)
     exploded = exploded[exploded['Num'].str.len() <= 2]
 
@@ -221,7 +215,6 @@ def fast_get_top_nums(df, p_map_dict, s_map_dict, top_n, min_v, inverse):
     stats = stats.reset_index()
     stats['Num_Int'] = stats['Num'].astype(int)
     
-    # Deterministic Sort (Sắp xếp nhất quán)
     if inverse:
         stats = stats.sort_values(by=['P', 'S', 'Num_Int'], ascending=[False, False, True])
     else:
@@ -261,7 +254,7 @@ def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits
     stats_std = {g: {'wins': 0, 'ranks': []} for g in groups}
     stats_mod = {g: {'wins': 0} for g in groups}
 
-    # --- PHASE 1: Backtest ---
+    # Phase 1: Backtest Group
     if not manual_groups:
         past_dates = []
         check_d = target_date - timedelta(days=1)
@@ -316,7 +309,7 @@ def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits
         top6_std = [x[0] for x in final_std[:6]]
         best_mod_grp = sorted(stats_mod.keys(), key=lambda g: (-stats_mod[g]['wins'], g))[0]
     
-    # --- PHASE 2: Predict ---
+    # Phase 2: Get Pools
     hist_series = df[col_hist_used].astype(str).str.upper().replace('S', '6', regex=False)
     hist_series = hist_series.str.replace(r'[^0-9X]', '', regex=True)
     
@@ -360,6 +353,8 @@ def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits
     return {
         "top6_std": top6_std, 
         "best_mod": best_mod_grp,
+        "dan_goc": final_original,
+        "dan_mod": final_modified,
         "dan_final": final_intersect, 
         "source_col": col_hist_used
     }
@@ -376,34 +371,26 @@ def analyze_group_performance(start_date, end_date, cut_limit, score_map, _cache
     score_map_tuple = tuple(score_map.items())
     grp_stats = {f"{i}x": {'wins': 0, 'ranks': [], 'history': [], 'last_pred': []} for i in range(10)}
     detailed_rows = [] 
-    
     for d in reversed(dates):
         day_record = {"Ngày": d.strftime("%d/%m"), "KQ": _kq_db.get(d, "N/A")}
         if d not in _kq_db or d not in _cache: 
              detailed_rows.append(day_record); continue
-        
         curr_data = _cache[d]
         df = curr_data['df']
         prev_date = d - timedelta(days=1)
         if prev_date not in _cache: 
             for k in range(2, 4):
-                if (d - timedelta(days=k)) in _cache: 
-                     prev_date = d - timedelta(days=k); break
-        
+                if (d - timedelta(days=k)) in _cache: prev_date = d - timedelta(days=k); break
         hist_col_name = curr_data['hist_map'].get(prev_date) if prev_date in curr_data['hist_map'] else None
         if not hist_col_name: detailed_rows.append(day_record); continue
-        
         try:
-            hist_series = df[hist_col_name].astype(str).str.upper().replace('S', '6', regex=False)
-            hist_series = hist_series.str.replace(r'[^0-9X]', '', regex=True)
+            hist_series = df[hist_col_name].astype(str).str.upper().replace('S', '6', regex=False).str.replace(r'[^0-9X]', '', regex=True)
         except: continue
-        
         kq = _kq_db[d]
         d_p_map = {}; d_s_map = {} 
         for col in df.columns:
             s_p = get_col_score(col, score_map_tuple)
             if s_p > 0: d_p_map[col] = s_p
-
         for g in grp_stats:
             mask = hist_series == g.upper()
             valid_mems = df[mask]
@@ -420,7 +407,6 @@ def analyze_group_performance(start_date, end_date, cut_limit, score_map, _cache
                 grp_stats[g]['history'].append("L")
                 day_record[g] = "MISS"
         detailed_rows.append(day_record)
-        
     final_report = []
     for g, info in grp_stats.items():
         hist = info['history']
@@ -445,7 +431,7 @@ def analyze_group_performance(start_date, end_date, cut_limit, score_map, _cache
     return df_rep, pd.DataFrame(detailed_rows)
 
 # ==============================================================================
-# 4. MODULE SĂN KỊCH BẢN (ĐÃ FIX LỖI UX)
+# 3. AUTO-HUNTER
 # ==============================================================================
 
 def analyze_column_ranks(target_date, lookback, _cache, _kq_db):
@@ -455,10 +441,8 @@ def analyze_column_ranks(target_date, lookback, _cache, _kq_db):
         if check_d in _cache and check_d in _kq_db: past_dates.append(check_d)
         check_d -= timedelta(days=1)
         if (target_date - check_d).days > 60: break
-    
     col_hits = Counter()
     if not past_dates: return []
-
     for d in past_dates:
         df = _cache[d]['df']
         kq = _kq_db[d]
@@ -466,12 +450,10 @@ def analyze_column_ranks(target_date, lookback, _cache, _kq_db):
         for col in m_cols:
             all_vals = " ".join(df[col].astype(str).tolist())
             if kq in get_nums(all_vals): col_hits[col] += 1
-            
     return col_hits.most_common()
 
 def generate_smart_scenarios(ranked_cols):
     scenarios = []
-    
     s1 = {f"M{i}": 0 for i in range(11)}
     if len(ranked_cols) >= 2:
         s1[ranked_cols[0][0].replace(" ","")] = 60
@@ -490,32 +472,26 @@ def generate_smart_scenarios(ranked_cols):
     scenarios.append(("Top 8 An Toàn", s3))
     
     s4 = {f"M{i}": 0 for i in range(11)}
-    if len(ranked_cols) >= 1:
-        s4[ranked_cols[0][0].replace(" ","")] = 100
+    if len(ranked_cols) >= 1: s4[ranked_cols[0][0].replace(" ","")] = 100
     scenarios.append(("Top 1 Gánh Team", s4))
-
     return scenarios
 
 def hunt_best_scenario(target_date, _cache, _kq_db, fixed_limits, min_v, use_inv, max_allowed_nums, progress_bar=None, status_text=None):
-    if status_text: status_text.text("🤖 Bước 1/3: Đang phân tích xu hướng dữ liệu...")
+    if status_text: status_text.text("🤖 Bước 1/3: Đang phân tích xu hướng...")
     ranked = analyze_column_ranks(target_date, 15, _cache, _kq_db)
-    if not ranked: return []
-    
     scenarios = generate_smart_scenarios(ranked)
     total_steps = len(scenarios)
     results = []
-    
     test_dates = []
     check = target_date - timedelta(days=1)
     while len(test_dates) < 5:
         if check in _kq_db: test_dates.append(check)
         check -= timedelta(days=1)
         if (target_date - check).days > 20: break
-        
+    
     for idx, (name, score_set) in enumerate(scenarios):
         if progress_bar: progress_bar.progress((idx + 1) / total_steps)
         if status_text: status_text.text(f"🤖 Bước 2/3: Đang đấu giải '{name}'...")
-        
         wins = 0
         total_nums = 0
         valid = 0
@@ -526,21 +502,18 @@ def hunt_best_scenario(target_date, _cache, _kq_db, fixed_limits, min_v, use_inv
                 if _kq_db[d] in t: wins += 1
                 total_nums += len(t)
                 valid += 1
-        
         if valid > 0:
             avg = total_nums / valid
             wr = (wins / valid) * 100
-            if 5 <= avg <= max_allowed_nums:
-                results.append({
-                    "Name": name, "WinRate": wr, "AvgNums": avg, "Scores": score_set
-                })
+            if avg <= max_allowed_nums:
+                results.append({"Name": name, "WinRate": wr, "AvgNums": avg, "Scores": score_set})
     
-    if status_text: status_text.text("✅ Hoàn tất! Đang tổng hợp kết quả...")
+    if status_text: status_text.text("✅ Hoàn tất!")
     results.sort(key=lambda x: (-x['WinRate'], x['AvgNums']))
     return results
 
 # ==============================================================================
-# 5. GIAO DIỆN CHÍNH
+# 6. GIAO DIỆN CHÍNH
 # ==============================================================================
 
 SCORES_PRESETS = {
@@ -566,7 +539,6 @@ def main():
     with st.sidebar:
         st.header("⚙️ Cài đặt")
         ROLLING_WINDOW = st.number_input("Chu kỳ xét (Ngày)", min_value=1, value=10)
-        
         with st.expander("🎚️ 1. Điểm M0-M10 (Cấu hình)", expanded=False):
             def update_scores():
                 choice = st.session_state.preset_choice
@@ -576,7 +548,6 @@ def main():
                         st.session_state[f'std_{i}'] = vals["STD"][i]
                         st.session_state[f'mod_{i}'] = vals["MOD"][i]
             st.selectbox("📚 Chọn bộ mẫu:", options=["Tùy chỉnh"] + list(SCORES_PRESETS.keys()), index=1, key="preset_choice", on_change=update_scores)
-            
             c_s1, c_s2 = st.columns(2)
             custom_std = {}
             custom_mod = {}
@@ -591,7 +562,6 @@ def main():
         st.header("⚖️ Lọc & Cắt")
         MIN_VOTES = st.number_input("Vote tối thiểu:", min_value=1, max_value=10, value=1)
         USE_INVERSE = st.checkbox("Chấm Điểm Đảo (Ngược)", value=False)
-        
         with st.expander("✂️ Chi tiết cắt Top (V25)", expanded=True):
             L_TOP_12 = st.number_input("Top 1 & 2 lấy:", value=80, key="L12")
             L_TOP_34 = st.number_input("Top 3 & 4 lấy:", value=65, key="L34")
@@ -599,12 +569,19 @@ def main():
             LIMIT_MODIFIED = st.number_input("Top 1 Modified lấy:", value=86, key="LMOD")
 
         st.markdown("---")
+        with st.expander("👁️ Hiển thị (Dự Đoán)", expanded=True):
+            c_v1, c_v2 = st.columns(2)
+            with c_v1:
+                show_goc = st.checkbox("Hiện Gốc", value=True)
+                show_mod = st.checkbox("Hiện Mod", value=True)
+            with c_v2:
+                show_final = st.checkbox("Hiện Final", value=True)
+
         if st.button("🗑️ XÓA CACHE", type="primary"):
             st.cache_data.clear(); st.rerun()
 
     if uploaded_files:
         data_cache, kq_db, f_status, err_logs = load_data_v24(uploaded_files)
-        
         with st.expander("🕵️ Trạng thái File", expanded=False):
             for s in f_status: st.success(s)
             for e in err_logs: st.error(e)
@@ -613,11 +590,10 @@ def main():
             limit_cfg = {'l12': L_TOP_12, 'l34': L_TOP_34, 'l56': L_TOP_56, 'mod': LIMIT_MODIFIED}
             last_d = max(data_cache.keys())
             
-            # --- 4 TABS: ĐÃ KHÔI PHỤC ---
             tab1, tab2, tab3, tab4 = st.tabs(["📊 DỰ ĐOÁN", "🔙 BACKTEST", "🔍 MATRIX", "🏹 SĂN KỊCH BẢN"])
             
             with tab1:
-                st.subheader("Dự đoán thủ công (Final 1)")
+                st.subheader("Dự đoán thủ công (3 Bảng)")
                 c_d1, c_d2 = st.columns([1, 1])
                 with c_d1: target = st.date_input("Ngày:", value=last_d)
                 
@@ -631,33 +607,53 @@ def main():
                     res = rr['res']
                     if not rr['err']:
                         st.success(f"Phân nhóm nguồn: {res['source_col']}")
-                        st.caption(f"Số lượng dàn: {len(res['dan_final'])} số")
-                        st.text_area("Final 1:", ",".join(res['dan_final']), height=100)
-                        st.info(f"🏆 Top 6 Gốc: {', '.join(res['top6_std'])}\n\n🌟 Best Mod: {res['best_mod']}")
+                        
+                        cols_to_show = []
+                        if show_goc: cols_to_show.append({"t": f"Gốc ({len(res['dan_goc'])})", "d": res['dan_goc'], "k": "Goc"})
+                        if show_mod: cols_to_show.append({"t": f"Mod ({len(res['dan_mod'])})", "d": res['dan_mod'], "k": "Mod"})
+                        if show_final: cols_to_show.append({"t": f"Final 1 ({len(res['dan_final'])})", "d": res['dan_final'], "k": "F1"})
+                        
+                        if cols_to_show:
+                            cols = st.columns(len(cols_to_show))
+                            for i, c_obj in enumerate(cols_to_show):
+                                with cols[i]:
+                                    st.caption(c_obj['t'])
+                                    st.text_area(c_obj['k'], ",".join(c_obj['d']), height=120)
+                                    if c_obj['k'] == "Goc":
+                                        st.info(f"🏆 Top 6 Gốc: {', '.join(res['top6_std'])}\n\n🌟 Best Mod: {res['best_mod']}")
+                        
                         if target in kq_db:
                             real = kq_db[target]
                             if real in res['dan_final']: st.balloons(); st.success(f"WIN {real}")
                             else: st.error(f"MISS {real}")
 
             with tab2:
-                st.subheader("Backtest (Kiểm chứng)")
-                d_range = st.date_input("Khoảng ngày:", [last_d - timedelta(days=7), last_d])
-                if st.button("Chạy Backtest"):
-                    start, end = d_range[0], d_range[1]
-                    logs = []
-                    delta = (end - start).days + 1
-                    for i in range(delta):
-                        d = start + timedelta(days=i)
-                        if d not in kq_db: continue
-                        res = calculate_v24_logic_only(d, ROLLING_WINDOW, data_cache, kq_db, limit_cfg, MIN_VOTES, custom_std, custom_mod, USE_INVERSE, None)
-                        if res:
-                            t = res['dan_final']
-                            logs.append({"Ngày": d.strftime("%d/%m"), "KQ": kq_db[d], "TT": "WIN" if kq_db[d] in t else "MISS", "Số": len(t)})
-                    if logs:
-                        df_log = pd.DataFrame(logs)
-                        wins = df_log[df_log["TT"]=="WIN"].shape[0]
-                        st.metric("WinRate", f"{(wins/len(df_log))*100:.1f}%")
-                        st.dataframe(df_log, use_container_width=True)
+                st.subheader("Backtest (Đã khôi phục)")
+                c_b1, c_b2 = st.columns(2)
+                with c_b1: d_start = st.date_input("Từ ngày:", value=last_d - timedelta(days=7))
+                with c_b2: d_end = st.date_input("Đến ngày:", value=last_d)
+                
+                if st.button("Chạy Backtest (Final 1)"):
+                    if d_start > d_end: st.error("Ngày bắt đầu phải nhỏ hơn ngày kết thúc!")
+                    else:
+                        dates_range = [d_start + timedelta(days=i) for i in range((d_end - d_start).days + 1)]
+                        logs = []
+                        bar = st.progress(0)
+                        for idx, d in enumerate(dates_range):
+                            bar.progress((idx + 1) / len(dates_range))
+                            if d not in kq_db: continue
+                            res = calculate_v24_logic_only(d, ROLLING_WINDOW, data_cache, kq_db, limit_cfg, MIN_VOTES, custom_std, custom_mod, USE_INVERSE, None)
+                            if res:
+                                t = res['dan_final']
+                                status = "WIN" if kq_db[d] in t else "MISS"
+                                logs.append({"Ngày": d.strftime("%d/%m"), "KQ": kq_db[d], "TT": status, "Số lượng": len(t)})
+                        bar.empty()
+                        
+                        if logs:
+                            df_log = pd.DataFrame(logs)
+                            wins = df_log[df_log["TT"]=="WIN"].shape[0]
+                            st.metric("WinRate (Final 1)", f"{wins}/{len(df_log)}", delta=f"{(wins/len(df_log))*100:.1f}%")
+                            st.dataframe(df_log, use_container_width=True)
 
             with tab3:
                 st.subheader("Phân Tích Matrix")
@@ -678,7 +674,7 @@ def main():
 
             with tab4:
                 st.subheader("🏹 Săn Kịch Bản Tối Ưu")
-                st.info("AI tự động phân tích tần suất trúng 15 ngày qua, tạo ra các chiến thuật (Bám Top, An Toàn...) và chọn cái tốt nhất.")
+                st.info("AI tự động phân tích tần suất trúng, tạo ra các chiến thuật và chọn cái tốt nhất.")
                 
                 c1, c2 = st.columns([1, 2])
                 with c1:
@@ -703,7 +699,7 @@ def main():
                     if 'best_scenarios' in st.session_state:
                         scenarios = st.session_state['best_scenarios']
                         if not scenarios:
-                            st.warning("⚠️ Không tìm thấy kịch bản nào phù hợp. Hãy tăng 'Max Số Lượng'.")
+                            st.warning("⚠️ Không tìm thấy kịch bản phù hợp. Hãy thử tăng Max Số Lượng.")
                         else:
                             st.success(f"🎉 Tìm thấy {len(scenarios)} kịch bản tiềm năng!")
                             for idx, sc in enumerate(scenarios):
