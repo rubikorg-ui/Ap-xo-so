@@ -18,7 +18,7 @@ st.set_page_config(
 )
 
 st.title("🛡️ Quang Handsome: V42 Stable Core")
-st.caption("🚀 Fix lỗi StreamlitAPIException | Callback System | Logic Gốc 100%")
+st.caption("🚀 Fix lỗi StreamlitAPIException | Callback System | Logic Gốc 100% | Hunter Pro AI")
 
 # Regex & Sets
 RE_NUMS = re.compile(r'\d+')
@@ -28,7 +28,7 @@ RE_SLASH_DATE = re.compile(r'(\d{1,2})[\.\-/](\d{1,2})')
 BAD_KEYWORDS = frozenset(['N', 'NGHI', 'SX', 'XIT', 'MISS', 'TRUOT', 'NGHỈ', 'LỖI'])
 
 # ==============================================================================
-# 2. CORE FUNCTIONS
+# 2. CORE FUNCTIONS (LOGIC GỐC - GIỮ NGUYÊN 100%)
 # ==============================================================================
 
 @lru_cache(maxsize=10000)
@@ -429,68 +429,97 @@ def analyze_group_performance(start_date, end_date, cut_limit, score_map, _cache
     return df_rep, pd.DataFrame(detailed_rows)
 
 # ==============================================================================
-# 3. AUTO-HUNTER
+# 3. AUTO-HUNTER PRO (NÂNG CẤP: DATA ANALYST LOGIC)
 # ==============================================================================
 
-def analyze_column_ranks(target_date, lookback, _cache, _kq_db):
+def analyze_market_trends(target_date, _cache, _kq_db):
+    """Phân tích sâu dữ liệu: Tách biệt độ nóng (Hot) và độ bền (Stable)"""
+    SHORT_TERM = 4; LONG_TERM = 18
     past_dates = []
     check_d = target_date - timedelta(days=1)
-    while len(past_dates) < lookback:
+    while len(past_dates) < LONG_TERM:
         if check_d in _cache and check_d in _kq_db: past_dates.append(check_d)
         check_d -= timedelta(days=1)
         if (target_date - check_d).days > 60: break
-    col_hits = Counter()
-    if not past_dates: return []
-    for d in past_dates:
+    if not past_dates: return [], []
+
+    col_stats = {}
+    for idx, d in enumerate(past_dates):
         df = _cache[d]['df']
         kq = _kq_db[d]
+        recency_weight = 1 / (0.1 * idx + 1) 
         for col in df.columns:
             clean_name = str(col).upper().replace(" ", "")
             if re.match(r'^M\d+$', clean_name):
+                if clean_name not in col_stats:
+                    col_stats[clean_name] = {'wins': 0, 'recency_score': 0.0}
                 all_vals = " ".join(df[col].astype(str).tolist())
-                if kq in get_nums(all_vals): col_hits[clean_name] += 1
-    return col_hits.most_common()
+                if kq in get_nums(all_vals):
+                    col_stats[clean_name]['wins'] += 1
+                    col_stats[clean_name]['recency_score'] += recency_weight
 
-def generate_smart_scenarios(ranked_cols):
+    ranked_stable = sorted(col_stats.items(), key=lambda x: x[1]['wins'], reverse=True)
+    ranked_hot = sorted(col_stats.items(), key=lambda x: x[1]['recency_score'], reverse=True)
+    return ranked_stable, ranked_hot
+
+def create_distribution(cols_ranked, strategy_type):
+    base_scores = {f"M{i}": 0 for i in range(11)}
+    top_cols = [x[0] for x in cols_ranked]
+    
+    if strategy_type == "FIBONACCI":
+        weights = [55, 34, 21, 13, 8, 5, 3, 2, 1, 1]
+        for idx, w in enumerate(weights):
+            if idx < len(top_cols): base_scores[top_cols[idx]] = w
+    elif strategy_type == "PARETO":
+        for idx in range(min(3, len(top_cols))): base_scores[top_cols[idx]] = 40
+        for idx in range(3, min(8, len(top_cols))): base_scores[top_cols[idx]] = 5
+    elif strategy_type == "LINEAR":
+        curr = 50
+        for col in top_cols:
+            if curr <= 0: break
+            base_scores[col] = curr; curr -= 5
+    elif strategy_type == "SNIPER":
+        weights = [80, 40, 20, 10, 5]
+        for idx, w in enumerate(weights):
+            if idx < len(top_cols): base_scores[top_cols[idx]] = w
+    elif strategy_type == "TOP6_BALANCED":
+        for idx in range(min(6, len(top_cols))): base_scores[top_cols[idx]] = 25
+    elif strategy_type == "TOP2":
+        if len(top_cols) >= 1: base_scores[top_cols[0]] = 60
+        if len(top_cols) >= 2: base_scores[top_cols[1]] = 50
+    return base_scores
+
+def generate_advanced_scenarios(ranked_stable, ranked_hot):
     scenarios = []
-    if not ranked_cols:
-        s_def = {f"M{i}": 0 for i in range(11)}; s_def["M10"] = 50; s_def["M9"] = 30
-        scenarios.append(("Mặc định (Backup)", s_def))
-        return scenarios
+    scenarios.append({"Name": "🔥 Hot: Fibo Trend", "Desc": "Bắt dây đỏ theo dãy Fibonacci.", "Scores": create_distribution(ranked_hot, "FIBONACCI")})
+    scenarios.append({"Name": "🔥 Hot: Sniper Top 1", "Desc": "Tất tay vào cột Top 1 Hot nhất.", "Scores": create_distribution(ranked_hot, "SNIPER")})
+    scenarios.append({"Name": "🔥 Hot: Top 2 Gánh", "Desc": "Chỉ lấy 2 cột hot nhất làm trụ.", "Scores": create_distribution(ranked_hot, "TOP2")})
+    scenarios.append({"Name": "🛡️ Stable: Pareto 80/20", "Desc": "Tập trung 20% cột ổn định nhất.", "Scores": create_distribution(ranked_stable, "PARETO")})
+    scenarios.append({"Name": "🛡️ Stable: Linear", "Desc": "Rải điểm đều từ cao xuống thấp.", "Scores": create_distribution(ranked_stable, "LINEAR")})
+    scenarios.append({"Name": "🛡️ Stable: Top 6 Đều", "Desc": "Lấy 6 cột ổn định, điểm bằng nhau.", "Scores": create_distribution(ranked_stable, "TOP6_BALANCED")})
     
-    s1 = {f"M{i}": 0 for i in range(11)}
-    if len(ranked_cols) >= 2:
-        s1[ranked_cols[0][0]] = 60
-        s1[ranked_cols[1][0]] = 40
-    scenarios.append(("Bám Top 2 (Hot)", s1))
+    s_hybrid = {f"M{i}": 0 for i in range(11)}
+    if ranked_stable: s_hybrid[ranked_stable[0][0]] = 60
+    if ranked_hot: 
+        h_col = ranked_hot[0][0]; s_hybrid[h_col] = s_hybrid.get(h_col, 0) + 50
+        if len(ranked_hot) > 1: h_c2 = ranked_hot[1][0]; s_hybrid[h_c2] = s_hybrid.get(h_c2, 0) + 30
+    scenarios.append({"Name": "⚡ Hybrid: Vua Lì + Sao Mới", "Desc": "Kết hợp ổn định và hot trend.", "Scores": s_hybrid})
     
-    s2 = {f"M{i}": 0 for i in range(11)}
-    weights = [50, 40, 30, 20, 10]
-    for idx, (col, _) in enumerate(ranked_cols[:5]):
-        if idx < len(weights): s2[col] = weights[idx]
-    scenarios.append(("Top 5 Phân Bố", s2))
-    
-    s3 = {f"M{i}": 0 for i in range(11)}
-    for idx, (col, _) in enumerate(ranked_cols[:8]):
-        s3[col] = 20
-    scenarios.append(("Top 8 An Toàn", s3))
-    
-    s4 = {f"M{i}": 0 for i in range(11)}
-    if len(ranked_cols) >= 1: s4[ranked_cols[0][0]] = 100
-    scenarios.append(("Top 1 Gánh Team", s4))
+    scenarios.append({"Name": "📦 Default: Gốc", "Desc": "Cấu hình chuẩn phòng khi nhiễu.", "Scores": {'M10': 50, 'M9': 30, 'M8': 25, 'M7': 20, 'M6': 15, 'M5': 10, 'M4': 5, 'M3':0, 'M2':0, 'M1':0, 'M0':0}})
     return scenarios
 
 def hunt_best_scenario(target_date, _cache, _kq_db, fixed_limits, min_v, use_inv, max_allowed_nums, progress_bar=None, status_text=None):
-    if status_text: status_text.text("🤖 Bước 1/3: Đang phân tích xu hướng...")
-    ranked = analyze_column_ranks(target_date, 15, _cache, _kq_db)
+    if status_text: status_text.text("📊 Bước 1/3: Phân tích độ nóng & ổn định...")
+    ranked_stable, ranked_hot = analyze_market_trends(target_date, _cache, _kq_db)
     
-    if not ranked and status_text:
-        status_text.text("⚠️ Không đọc được cột M nào. Dùng mặc định.")
-        ranked = [('M10', 10), ('M9', 8), ('M8', 6), ('M5', 5), ('M6', 4)]
+    if not ranked_stable and status_text:
+        status_text.warning("⚠️ Dữ liệu ít. Dùng dummy.")
+        ranked_stable = [('M10', {'wins': 1})]; ranked_hot = [('M10', {'recency_score': 1})]
 
-    scenarios = generate_smart_scenarios(ranked)
+    scenarios = generate_advanced_scenarios(ranked_stable, ranked_hot)
     total_steps = len(scenarios)
     results = []
+    
     test_dates = []
     check = target_date - timedelta(days=1)
     while len(test_dates) < 5:
@@ -498,34 +527,30 @@ def hunt_best_scenario(target_date, _cache, _kq_db, fixed_limits, min_v, use_inv
         check -= timedelta(days=1)
         if (target_date - check).days > 30: break
     
-    for idx, (name, score_set) in enumerate(scenarios):
+    for idx, sc in enumerate(scenarios):
         if progress_bar: progress_bar.progress((idx + 1) / total_steps)
-        if status_text: status_text.text(f"🤖 Bước 2/3: Đang đấu giải '{name}'...")
-        wins = 0
-        total_nums = 0
-        valid = 0
+        if status_text: status_text.text(f"⚔️ Bước 2/3: Đấu giải '{sc['Name']}'...")
+        wins = 0; total_nums = 0; valid = 0
         for d in test_dates:
-            res = calculate_v24_logic_only(d, 3, _cache, _kq_db, fixed_limits, min_v, score_set, score_set, use_inv, None)
+            res = calculate_v24_logic_only(d, 3, _cache, _kq_db, fixed_limits, min_v, sc['Scores'], sc['Scores'], use_inv, None)
             if res:
                 t = res['dan_final']
                 if _kq_db[d] in t: wins += 1
-                total_nums += len(t)
-                valid += 1
+                total_nums += len(t); valid += 1
         if valid > 0:
-            avg = total_nums / valid
-            wr = (wins / valid) * 100
-            if avg <= max_allowed_nums:
-                results.append({"Name": name, "WinRate": wr, "AvgNums": avg, "Scores": score_set})
+            avg = total_nums / valid; wr = (wins / valid) * 100
+            eff_score = wr - (avg * 0.4) 
+            if avg <= max_allowed_nums + 2:
+                results.append({"Name": sc['Name'], "Desc": sc['Desc'], "WinRate": wr, "AvgNums": avg, "EffScore": eff_score, "Scores": sc['Scores']})
     
     if status_text: status_text.text("✅ Hoàn tất!")
-    results.sort(key=lambda x: (-x['WinRate'], x['AvgNums']))
+    results.sort(key=lambda x: (-x['EffScore'], -x['WinRate'], x['AvgNums']))
     return results
 
 # ==============================================================================
 # 4. GIAO DIỆN CHÍNH
 # ==============================================================================
 
-# Callback cập nhật điểm để tránh lỗi StreamlitAPIException
 def apply_hunter_callback(scores):
     for k, v in scores.items():
         key_suffix = k[1:] 
@@ -601,7 +626,6 @@ def main():
             for s in f_status: st.success(s)
             for e in err_logs: st.error(e)
         
-        # Check success flag
         if st.session_state.get('applied_success'):
             st.toast("✅ Đã áp dụng cấu hình thành công!", icon="🎉")
             st.session_state['applied_success'] = False
@@ -610,7 +634,7 @@ def main():
             limit_cfg = {'l12': L_TOP_12, 'l34': L_TOP_34, 'l56': L_TOP_56, 'mod': LIMIT_MODIFIED}
             last_d = max(data_cache.keys())
             
-            tab1, tab2, tab3, tab4 = st.tabs(["📊 DỰ ĐOÁN", "🔙 BACKTEST", "🔍 MATRIX", "🏹 SĂN KỊCH BẢN"])
+            tab1, tab2, tab3, tab4 = st.tabs(["📊 DỰ ĐOÁN", "🔙 BACKTEST", "🔍 MATRIX", "🏹 SĂN KỊCH BẢN (AI)"])
             
             with tab1:
                 st.subheader("Dự đoán thủ công (3 Bảng)")
@@ -619,7 +643,6 @@ def main():
                 
                 if st.button("🚀 CHẠY PHÂN TÍCH", type="primary", use_container_width=True):
                     with st.spinner("Đang tính toán..."):
-                        # Lấy values từ session state
                         custom_std = {f'M{i}': st.session_state[f'std_{i}'] for i in range(11)}
                         custom_mod = {f'M{i}': st.session_state[f'mod_{i}'] for i in range(11)}
                         res, err = calculate_v24_final(target, ROLLING_WINDOW, data_cache, kq_db, limit_cfg, MIN_VOTES, custom_std, custom_mod, USE_INVERSE, None)
@@ -696,8 +719,8 @@ def main():
                         st.dataframe(df_detail, use_container_width=True)
 
             with tab4:
-                st.subheader("🏹 Săn Kịch Bản Tối Ưu")
-                st.info("AI tự động phân tích tần suất trúng, tạo ra các chiến thuật và chọn cái tốt nhất.")
+                st.subheader("🏹 Săn Kịch Bản (Auto-Hunter AI)")
+                st.info("AI Data Analyst: Phân tích xu hướng (Hot/Stable) và áp dụng chiến thuật toán học (Fibonacci, Pareto...).")
                 
                 c1, c2 = st.columns([1, 2])
                 with c1:
@@ -705,7 +728,7 @@ def main():
                     max_nums_hunter = st.slider("Max Số Lượng:", 40, 80, 65, key="mx_hunter")
                     
                     if st.button("🏹 BẮT ĐẦU SĂN", type="primary"):
-                        st.toast("🚀 Đã nhận lệnh! AI đang khởi động...") 
+                        st.toast("🚀 AI đang phân tích dữ liệu...") 
                         prog_bar = st.progress(0)
                         status_txt = st.empty()
                         
@@ -722,12 +745,14 @@ def main():
                     if 'best_scenarios' in st.session_state:
                         scenarios = st.session_state['best_scenarios']
                         if not scenarios:
-                            st.warning("⚠️ Không tìm thấy kịch bản nào phù hợp tiêu chí số lượng. Hãy tăng 'Max Số Lượng' lên 70 hoặc 75.")
+                            st.warning("⚠️ Không tìm thấy kịch bản phù hợp tiêu chí. Hãy tăng 'Max Số Lượng'.")
                         else:
-                            st.success(f"🎉 Tìm thấy {len(scenarios)} kịch bản tiềm năng!")
+                            st.success(f"🎉 Tìm thấy {len(scenarios)} chiến thuật tiềm năng!")
                             for idx, sc in enumerate(scenarios):
-                                with st.expander(f"🏅 #{idx+1}: {sc['Name']} | Win {sc['WinRate']:.0f}% | TB {sc['AvgNums']:.1f} số", expanded=(idx==0)):
-                                    st.write("**Bộ điểm đề xuất:**")
+                                exp_title = f"🏅 #{idx+1}: {sc['Name']} | Win {sc['WinRate']:.0f}% | TB {sc['AvgNums']:.1f} số"
+                                with st.expander(exp_title, expanded=(idx==0)):
+                                    st.caption(f"ℹ️ {sc['Desc']}")
+                                    st.write(f"**Hiệu suất (Score):** {sc['EffScore']:.1f}")
                                     st.json(sc['Scores'])
                                     st.button(f"👉 Áp dụng #{idx+1}", key=f"apply_{idx}", on_click=apply_hunter_callback, args=(sc['Scores'],))
 
