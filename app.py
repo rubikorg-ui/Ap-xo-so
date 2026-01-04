@@ -10,14 +10,14 @@ from functools import lru_cache
 # 1. CẤU HÌNH HỆ THỐNG & UI
 # ==============================================================================
 st.set_page_config(
-    page_title="Quang Pro V29 - Customizable UI", 
+    page_title="Quang Pro V30 - MN Config Added", 
     page_icon="🎯", 
     layout="wide",
     initial_sidebar_state="collapsed" 
 )
 
-st.title("🎯 Quang Handsome: V29 Ultimate Custom")
-st.caption("🚀 Final 3 = Gốc + Smart 58 | Tùy chỉnh hiển thị | Logic 100% Fixed")
+st.title("🎯 Quang Handsome: V30 Ultimate")
+st.caption("🚀 New Config 'MN' Added | Final 3 | Tùy chỉnh hiển thị | Logic 100% Fixed")
 
 # Regex & Sets (Nguyên bản)
 RE_NUMS = re.compile(r'\d+')
@@ -170,7 +170,7 @@ def load_data_v24(files):
     return cache, kq_db, file_status, err_logs
 
 # ==============================================================================
-# 3. MODULE K55 (100% LOGIC PRESERVED)
+# 3. MODULE K55
 # ==============================================================================
 def k55_parse_numbers(val):
     if pd.isna(val): return []
@@ -256,7 +256,7 @@ def calculate_k55_integrated(target_date, cache, kq_db, k55_limit):
     return hybrid_set, None
 
 # ==============================================================================
-# 4. MODULE SMART 58 (100% LOGIC PRESERVED)
+# 4. MODULE SMART 58
 # ==============================================================================
 
 def smart58_get_weighted_numbers(row):
@@ -608,6 +608,10 @@ SCORES_PRESETS = {
     "Lai tạo (Hybrid - Thực chiến)": {
         "STD": [0, 2, 4, 6, 12, 16, 20, 25, 30, 32, 35],
         "MOD": [0, 5, 10, 15, 30, 30, 50, 35, 25, 25, 40]
+    },
+    "MN (Cấu hình tùy chỉnh)": {
+        "STD": [50, 8, 9, 10, 10, 30, 40, 30, 25, 30, 30],
+        "MOD": [0, 5, 10, 15, 30, 30, 50, 35, 25, 25, 40]
     }
 }
 
@@ -673,7 +677,7 @@ def main():
             SMART58_LIMIT = st.number_input("Smart 58 lấy bao nhiêu số?", min_value=10, max_value=90, value=58)
         
         # --------------------------------------------------------
-        # DISPLAY OPTIONS (NEW)
+        # DISPLAY OPTIONS
         # --------------------------------------------------------
         st.markdown("---")
         with st.expander("👁️ Tùy chọn hiển thị", expanded=True):
