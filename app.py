@@ -787,6 +787,13 @@ def main():
                                         if "F2" in c_obj['t'] or "F3" in c_obj['t']: st.error(c_obj['t'])
                                         else: st.caption(c_obj['t'])
                                         st.text_area(c_obj['k'], ",".join(c_obj['d']), height=120, label_visibility="collapsed")
+                                        
+                                        # --- CẬP NHẬT MỚI: HIỂN THỊ TOP 6 & BEST MOD ---
+                                        if c_obj['k'] == "Goc":
+                                            t6 = ", ".join(res['top6_std'])
+                                            bm = res['best_mod']
+                                            st.info(f"🏆 Top 6: {t6}\n\n🌟 Best Mod: {bm}")
+                                        # -----------------------------------------------
                             else: st.warning("Bạn đã tắt hết các bảng hiển thị!")
 
                             if target in kq_db:
