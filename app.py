@@ -11,14 +11,14 @@ from functools import lru_cache
 # 1. CẤU HÌNH HỆ THỐNG
 # ==============================================================================
 st.set_page_config(
-    page_title="Quang Pro V32 - Final 1 Focus", 
-    page_icon="🎯", 
+    page_title="Quang Pro V34 - Turbo Core", 
+    page_icon="⚡", 
     layout="wide",
     initial_sidebar_state="collapsed" 
 )
 
-st.title("🎯 Quang Handsome: V32 Final 1 Specialist")
-st.caption("🚀 Chỉ tập trung tối ưu hóa Dàn Giao Thoa (Final 1)")
+st.title("⚡ Quang Handsome: V34 Turbo Core")
+st.caption("🚀 Final 1 Focus | Fixed Limits Strategy | Speed Optimized 10x")
 
 # Regex & Sets
 RE_NUMS = re.compile(r'\d+')
@@ -351,7 +351,6 @@ def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits
 
     final_intersect = sorted(list(set(final_original).intersection(set(final_modified))))
     
-    # CHỈ TRẢ VỀ FINAL ĐỂ TỐI ƯU
     return {
         "top6_std": top6_std, 
         "best_mod": best_mod_grp,
@@ -365,28 +364,99 @@ def calculate_v24_final(target_date, rolling_window, _cache, _kq_db, limits_conf
     if not res: return None, "Lỗi dữ liệu"
     return res, None
 
+def analyze_group_performance(start_date, end_date, cut_limit, score_map, _cache, _kq_db, min_v, inverse):
+    delta = (end_date - start_date).days + 1
+    dates = [start_date + timedelta(days=i) for i in range(delta)]
+    score_map_tuple = tuple(score_map.items())
+    grp_stats = {f"{i}x": {'wins': 0, 'ranks': [], 'history': [], 'last_pred': []} for i in range(10)}
+    detailed_rows = [] 
+    
+    for d in reversed(dates):
+        day_record = {"Ngày": d.strftime("%d/%m"), "KQ": _kq_db.get(d, "N/A")}
+        if d not in _kq_db or d not in _cache: 
+            for g in grp_stats: 
+                grp_stats[g]['history'].append(None); grp_stats[g]['ranks'].append(999); day_record[g] = "-"
+            detailed_rows.append(day_record); continue
+        
+        curr_data = _cache[d]
+        df = curr_data['df']
+        prev_date = d - timedelta(days=1)
+        if prev_date not in _cache: 
+            for k in range(2, 4):
+                if (d - timedelta(days=k)) in _cache: 
+                     prev_date = d - timedelta(days=k); break
+        
+        hist_col_name = curr_data['hist_map'].get(prev_date) if prev_date in curr_data['hist_map'] else None
+        if not hist_col_name:
+             for g in grp_stats: 
+                 grp_stats[g]['history'].append(None); grp_stats[g]['ranks'].append(999); day_record[g] = "-"
+             detailed_rows.append(day_record); continue
+        
+        try:
+            hist_series = df[hist_col_name].astype(str).str.upper().replace('S', '6', regex=False)
+            hist_series = hist_series.str.replace(r'[^0-9X]', '', regex=True)
+        except: continue
+        
+        kq = _kq_db[d]
+        d_p_map = {}; d_s_map = {} 
+        for col in df.columns:
+            s_p = get_col_score(col, score_map_tuple)
+            if s_p > 0: d_p_map[col] = s_p
+
+        for g in grp_stats:
+            mask = hist_series == g.upper()
+            valid_mems = df[mask]
+            top_list = fast_get_top_nums(valid_mems, d_p_map, d_p_map, cut_limit, min_v, inverse)
+            top_set = set(top_list)
+            grp_stats[g]['last_pred'] = sorted(top_list)
+            if kq in top_set:
+                grp_stats[g]['wins'] += 1
+                grp_stats[g]['ranks'].append(top_list.index(kq) + 1)
+                grp_stats[g]['history'].append("W")
+                day_record[g] = "WIN" 
+            else:
+                grp_stats[g]['ranks'].append(999) 
+                grp_stats[g]['history'].append("L")
+                day_record[g] = "MISS"
+        detailed_rows.append(day_record)
+        
+    final_report = []
+    for g, info in grp_stats.items():
+        hist = info['history']
+        valid_days = len([x for x in hist if x is not None])
+        wins = info['wins']
+        hist_cron = list(reversed(hist))
+        max_lose = 0; curr_lose = 0; temp_lose = 0
+        for x in reversed(hist_cron):
+            if x == "L": curr_lose += 1
+            elif x == "W": break
+        for x in hist_cron:
+            if x == "L": temp_lose += 1
+            else: max_lose = max(max_lose, temp_lose); temp_lose = 0
+        max_lose = max(max_lose, temp_lose)
+        final_report.append({
+            "Nhóm": g, "Số ngày trúng": wins,
+            "Tỉ lệ": f"{(wins/valid_days)*100:.1f}%" if valid_days > 0 else "0%",
+            "Gãy thông": max_lose, "Gãy hiện tại": curr_lose
+        })
+    df_rep = pd.DataFrame(final_report)
+    if not df_rep.empty: df_rep = df_rep.sort_values(by="Số ngày trúng", ascending=False)
+    return df_rep, pd.DataFrame(detailed_rows)
+
 # ==============================================================================
-# 3. AUTO-OPTIMIZER (FINAL 1 SPECIALIST)
+# 3. AUTO-OPTIMIZER (SCORE ONLY - TURBO SPEED)
 # ==============================================================================
 
 def random_score_set():
-    base_pool = [0, 5, 10, 15, 20, 25, 30, 40, 50, 60]
+    # Thu hẹp phạm vi điểm để máy dò nhanh hơn
+    base_pool = [0, 10, 20, 30, 40, 50] 
     s = {}
     for i in range(11):
-        if i == 10: s[f'M{i}'] = random.choice([30, 40, 50, 60, 80, 100])
+        if i == 10: s[f'M{i}'] = random.choice([30, 40, 50, 60, 80])
         else: s[f'M{i}'] = random.choice(base_pool)
     return s
 
-def random_limits():
-    # Mở rộng giới hạn để tìm ra điểm giao thoa tốt nhất
-    return {
-        'l12': random.choice([75, 80, 85, 90]), 
-        'l34': random.choice([60, 65, 70, 75]),
-        'l56': random.choice([55, 60, 65, 70]),
-        'mod': random.choice([80, 85, 88, 92])
-    }
-
-def run_optimization(trials, start_d, end_d, _cache, _kq_db, min_v, use_inv, max_allowed_nums):
+def run_optimization_scores_only(trials, start_d, end_d, _cache, _kq_db, min_v, use_inv, max_allowed_nums, fixed_limits):
     best_results = []
     delta = (end_d - start_d).days + 1
     dates_to_test = [start_d + timedelta(days=i) for i in range(delta)]
@@ -398,19 +468,20 @@ def run_optimization(trials, start_d, end_d, _cache, _kq_db, min_v, use_inv, max
     status_text = st.empty()
     
     for i in range(trials):
+        # CHỈ RANDOM ĐIỂM SỐ
         r_std = random_score_set()
         r_mod = random_score_set()
-        r_lim = random_limits()
+        # LIMITS CỐ ĐỊNH THEO UI
         
         wins = 0
         total_nums = 0
         valid_days_count = 0
         
         for d in dates_to_test:
-            # Chạy nhanh với rolling=5
-            res = calculate_v24_logic_only(d, 5, _cache, _kq_db, r_lim, min_v, r_std, r_mod, use_inv, None)
+            # Dùng chu kỳ rolling nhỏ (3) để tăng tốc dò tìm
+            res = calculate_v24_logic_only(d, 3, _cache, _kq_db, fixed_limits, min_v, r_std, r_mod, use_inv, None)
             if res:
-                final_set = res['dan_final'] # CHỈ QUAN TÂM FINAL 1
+                final_set = res['dan_final']
                 real = _kq_db[d]
                 if real in final_set: wins += 1
                 total_nums += len(final_set)
@@ -420,9 +491,6 @@ def run_optimization(trials, start_d, end_d, _cache, _kq_db, min_v, use_inv, max
             avg_nums = total_nums / valid_days_count
             win_rate = (wins / valid_days_count) * 100
             
-            # Smart Filter cho Final 1:
-            # 1. Trung bình số phải <= Max
-            # 2. Trung bình số phải >= 5 (để tránh trường hợp dàn rỗng liên tục mà vẫn tính là OK)
             if 5 <= avg_nums <= max_allowed_nums:
                 best_results.append({
                     "WinRate": win_rate,
@@ -430,18 +498,17 @@ def run_optimization(trials, start_d, end_d, _cache, _kq_db, min_v, use_inv, max
                     "AvgNums": avg_nums,
                     "STD": r_std,
                     "MOD": r_mod,
-                    "LIMITS": r_lim
+                    "LIMITS": fixed_limits # Ghi lại để hiển thị
                 })
         
-        if i % 25 == 0:
+        if i % 50 == 0:
             progress_bar.progress((i + 1) / trials)
             curr_best = max([x['WinRate'] for x in best_results] + [0])
-            status_text.text(f"Đang tối ưu Final 1: {i+1}/{trials} | Max Win: {curr_best:.1f}%")
+            status_text.text(f"Đang dò siêu tốc: {i+1}/{trials} | Max Win: {curr_best:.1f}%")
 
     progress_bar.empty()
     status_text.empty()
     
-    # Sắp xếp: Ưu tiên Tỷ lệ thắng -> Sau đó ưu tiên ít số
     best_results.sort(key=lambda x: (-x['WinRate'], x['AvgNums']))
     return best_results[:5]
 
@@ -452,6 +519,10 @@ def run_optimization(trials, start_d, end_d, _cache, _kq_db, min_v, use_inv, max
 SCORES_PRESETS = {
     "Gốc (V24 Standard)": {
         "STD": [0, 1, 2, 3, 4, 5, 6, 7, 15, 25, 50],
+        "MOD": [0, 5, 10, 15, 30, 30, 50, 35, 25, 25, 40]
+    },
+    "Miền Nam (Theo Ảnh)": {
+        "STD": [50, 8, 9, 10, 10, 30, 40, 30, 25, 30, 30],
         "MOD": [0, 5, 10, 15, 30, 30, 50, 35, 25, 25, 40]
     }
 }
@@ -470,6 +541,22 @@ def main():
         ROLLING_WINDOW = st.number_input("Chu kỳ xét (Ngày)", min_value=1, value=10)
         
         with st.expander("🎚️ 1. Điểm M0-M10 (Cấu hình)", expanded=False):
+            def update_scores():
+                choice = st.session_state.preset_choice
+                if choice in SCORES_PRESETS:
+                    vals = SCORES_PRESETS[choice]
+                    for i in range(11):
+                        st.session_state[f'std_{i}'] = vals["STD"][i]
+                        st.session_state[f'mod_{i}'] = vals["MOD"][i]
+
+            st.selectbox(
+                "📚 Chọn bộ tham số mẫu:",
+                options=["Tùy chỉnh"] + list(SCORES_PRESETS.keys()),
+                index=1, 
+                key="preset_choice",
+                on_change=update_scores
+            )
+            st.markdown("---")
             c_s1, c_s2 = st.columns(2)
             custom_std = {}
             custom_mod = {}
@@ -487,7 +574,7 @@ def main():
         MIN_VOTES = st.number_input("Vote tối thiểu:", min_value=1, max_value=10, value=1)
         USE_INVERSE = st.checkbox("Chấm Điểm Đảo (Ngược)", value=False)
         
-        with st.expander("✂️ Chi tiết cắt Top (V25)", expanded=False):
+        with st.expander("✂️ Chi tiết cắt Top (V25)", expanded=True):
             L_TOP_12 = st.number_input("Top 1 & 2 lấy:", value=80, key="L12")
             L_TOP_34 = st.number_input("Top 3 & 4 lấy:", value=65, key="L34")
             L_TOP_56 = st.number_input("Top 5 & 6 lấy:", value=60, key="L56")
@@ -508,7 +595,8 @@ def main():
             limit_cfg = {'l12': L_TOP_12, 'l34': L_TOP_34, 'l56': L_TOP_56, 'mod': LIMIT_MODIFIED}
             last_d = max(data_cache.keys())
             
-            tab1, tab2, tab3 = st.tabs(["📊 DỰ ĐOÁN", "🔙 BACKTEST", "🎯 TỐI ƯU FINAL 1"])
+            # --- TABS: ĐẦY ĐỦ 4 TAB ---
+            tab1, tab2, tab3, tab4 = st.tabs(["📊 DỰ ĐOÁN", "🔙 BACKTEST", "🔍 PHÂN TÍCH", "💎 TỐI ƯU SIÊU TỐC"])
             
             with tab1:
                 st.subheader("Dự đoán hàng ngày (Chỉ Final 1)")
@@ -526,10 +614,7 @@ def main():
                     if not rr['err']:
                         st.success(f"Phân nhóm nguồn: {res['source_col']}")
                         st.caption(f"Số lượng dàn: {len(res['dan_final'])} số")
-                        
                         st.text_area("Final 1 (Giao thoa Gốc + Mod)", ",".join(res['dan_final']), height=100)
-                        
-                        # Chỉ hiển thị info cần thiết
                         st.info(f"🏆 Top 6 Gốc: {', '.join(res['top6_std'])}\n\n🌟 Best Mod: {res['best_mod']}")
 
                         if target in kq_db:
@@ -551,10 +636,9 @@ def main():
                             if d not in kq_db: continue
                             res = calculate_v24_logic_only(d, ROLLING_WINDOW, data_cache, kq_db, limit_cfg, MIN_VOTES, custom_std, custom_mod, USE_INVERSE, None)
                             if res:
-                                t_set = res['dan_final'] # CHỈ LẤY FINAL
+                                t_set = res['dan_final']
                                 real = kq_db[d]
                                 logs.append({"Ngày": d.strftime("%d/%m"), "KQ": real, "TT": "WIN" if real in t_set else "MISS", "Số số": len(t_set)})
-                        
                         if logs:
                             df_log = pd.DataFrame(logs)
                             wins = df_log[df_log["TT"] == "WIN"].shape[0]
@@ -562,42 +646,61 @@ def main():
                             st.dataframe(df_log, use_container_width=True)
 
             with tab3:
-                st.subheader("🎯 Tối ưu hóa Dàn Giao Thoa (Final 1)")
-                st.info("Hệ thống sẽ tìm điểm Gốc & Mod sao cho phần Giao Nhau (Intersection) có tỷ lệ thắng cao nhất.")
+                st.subheader("Phân Tích Matrix")
+                with st.expander("⚙️ Cấu hình", expanded=True):
+                    c_a1, c_a2 = st.columns(2)
+                    with c_a1: d_range_a = st.date_input("Thời gian:", [last_d - timedelta(days=15), last_d], key="dr_a")
+                    with c_a2: 
+                        cut_val = st.number_input("Cắt Top:", value=60, step=5, key="cut_mtx")
+                        score_mode = st.radio("Hệ điểm:", ["Gốc (Std)", "Modified"], horizontal=True)
+                    btn_scan = st.button("🔎 QUÉT MATRIX", use_container_width=True)
+                
+                if btn_scan:
+                    if len(d_range_a) < 2: st.warning("Chọn đủ ngày.")
+                    else:
+                        with st.spinner("Đang xử lý..."):
+                            s_map = custom_std if score_mode == "Gốc (Std)" else custom_mod
+                            df_report, df_detail = analyze_group_performance(d_range_a[0], d_range_a[1], cut_val, s_map, data_cache, kq_db, MIN_VOTES, USE_INVERSE)
+                            st.dataframe(df_report, use_container_width=True)
+                            st.dataframe(df_detail, use_container_width=True)
+
+            with tab4:
+                st.subheader("⚡ Dò tìm Siêu Tốc (Chỉ dò Điểm)")
+                st.info(f"Đang khóa Cắt Top: L12={L_TOP_12}, L34={L_TOP_34}, L56={L_TOP_56}, MOD={LIMIT_MODIFIED}. Chỉ thay đổi M0-M10.")
                 
                 c_o1, c_o2, c_o3 = st.columns(3)
                 with c_o1:
                     opt_days = st.slider("Số ngày Backtest:", 5, 20, 10)
                 with c_o2:
-                    n_trials = st.selectbox("Số lần thử nghiệm:", [500, 1000, 2000], index=1)
+                    n_trials = st.selectbox("Số lần thử nghiệm:", [200, 500, 1000], index=1)
                 with c_o3:
-                    max_allowed_nums = st.slider("Max Số Lượng (Final 1):", 30, 80, 60)
+                    max_allowed_nums = st.slider("Max Số Lượng:", 30, 80, 65)
                 
                 opt_end_date = st.date_input("Ngày kết thúc xét duyệt:", value=last_d)
                 start_opt_date = opt_end_date - timedelta(days=opt_days)
                 
-                if st.button("🔥 BẮT ĐẦU DÒ TÌM", type="primary", use_container_width=True):
-                    with st.spinner("Đang tìm kiếm giao điểm vàng..."):
-                        best_configs = run_optimization(n_trials, start_opt_date, opt_end_date, data_cache, kq_db, MIN_VOTES, USE_INVERSE, max_allowed_nums)
+                if st.button("🔥 BẮT ĐẦU DÒ TÌM (TURBO)", type="primary", use_container_width=True):
+                    with st.spinner("Đang kích hoạt chế độ Turbo..."):
+                        # Lấy cố định Limit từ Sidebar
+                        fixed_limits = {'l12': L_TOP_12, 'l34': L_TOP_34, 'l56': L_TOP_56, 'mod': LIMIT_MODIFIED}
+                        
+                        best_configs = run_optimization_scores_only(
+                            n_trials, start_opt_date, opt_end_date, data_cache, kq_db, MIN_VOTES, USE_INVERSE, max_allowed_nums, fixed_limits
+                        )
                         
                         if not best_configs:
-                            st.warning(f"Không tìm thấy cấu hình nào có trung bình số <= {max_allowed_nums}. Hãy nới lỏng giới hạn.")
+                            st.warning("Không tìm thấy cấu hình thỏa mãn. Hãy nới lỏng Max Số Lượng.")
                         else:
-                            st.success("🎉 Tìm thấy cấu hình tối ưu cho Final 1!")
+                            st.success("🎉 Đã tìm thấy!")
                             for idx, cfg in enumerate(best_configs):
                                 with st.expander(f"🏆 TOP {idx+1}: Win {cfg['WinRate']:.1f}% - TB {cfg['AvgNums']:.1f} số", expanded=(idx==0)):
-                                    c1, c2, c3 = st.columns(3)
+                                    c1, c2 = st.columns(2)
                                     with c1: st.write("GỐC"); st.json(cfg['STD'])
                                     with c2: st.write("MOD"); st.json(cfg['MOD'])
-                                    with c3: st.write("CUT"); st.json(cfg['LIMITS'])
                                     
                                     if st.button(f"👉 Áp dụng Top {idx+1}", key=f"apply_{idx}"):
                                         for k, v in cfg['STD'].items(): st.session_state[f'std_{k[1:]}'] = v
                                         for k, v in cfg['MOD'].items(): st.session_state[f'mod_{k[1:]}'] = v
-                                        st.session_state['L12'] = cfg['LIMITS']['l12']
-                                        st.session_state['L34'] = cfg['LIMITS']['l34']
-                                        st.session_state['L56'] = cfg['LIMITS']['l56']
-                                        st.session_state['LMOD'] = cfg['LIMITS']['mod']
                                         st.success("Đã áp dụng!")
                                         st.rerun()
 
