@@ -10,14 +10,14 @@ from functools import lru_cache
 # 1. CẤU HÌNH HỆ THỐNG & UI
 # ==============================================================================
 st.set_page_config(
-    page_title="Quang Pro V29 - Ultimate Final", 
+    page_title="Quang Pro V32 - Ultimate Final", 
     page_icon="🎯", 
     layout="wide",
     initial_sidebar_state="collapsed" 
 )
 
-st.title("🎯 Quang Handsome: V29 Ultimate Custom")
-st.caption("🚀 Final 7 = Gốc + Smart 58 | Fix Config Reset | Removed MN")
+st.title("🎯 Quang Handsome: V32 Ultimate Custom")
+st.caption("🚀 Final 9 | MT VIP (Safe Mode) | MN Restored | Logic Reset Fixed")
 
 # Regex & Sets
 RE_NUMS = re.compile(r'\d+')
@@ -598,19 +598,26 @@ SCORES_PRESETS = {
     "Gốc (V24 Standard)": {
         "STD": [0, 1, 2, 3, 4, 5, 6, 7, 15, 25, 50],
         "MOD": [0, 5, 10, 15, 30, 30, 50, 35, 25, 25, 40],
-        "L_STD": 80, "L_MOD": 86, "ROLLING": 10, # Chu kỳ mặc định 10
+        "L_STD": 80, "L_MOD": 86, "ROLLING": 10, 
         "L34": 65, "L56": 60
     },
-    "MT Super VIP (Target < 55s)": {
+    "MT (AI Optimized - Safe)": {
         "STD": [95, 80, 40, 50, 15, 85, 5, 55, 25, 80, 75], 
         "MOD": [25, 100, 20, 5, 60, 95, 35, 75, 85, 60, 100],
-        "L_STD": 75, "L_MOD": 68, "ROLLING": 12, # Chu kỳ tối ưu 12
-        "L34": 65, "L56": 55
+        "L_STD": 82, "L_MOD": 78, "ROLLING": 12, # Đã nới rộng biên độ để an toàn
+        "L34": 65, "L56": 58
+    },
+    "MN (Miền Nam - Gốc)": { 
+        # Clone of Gốc standard (An toàn khi chưa có data)
+        "STD": [0, 1, 2, 3, 4, 5, 6, 7, 15, 25, 50],
+        "MOD": [0, 5, 10, 15, 30, 30, 50, 35, 25, 25, 40],
+        "L_STD": 80, "L_MOD": 86, "ROLLING": 10, 
+        "L34": 65, "L56": 60
     },
     "Lai tạo (Hybrid - Thực chiến)": {
         "STD": [0, 2, 4, 6, 12, 16, 20, 25, 30, 32, 35],
         "MOD": [0, 5, 10, 15, 30, 30, 50, 35, 25, 25, 40],
-        "L_STD": 80, "L_MOD": 86, "ROLLING": 10,
+        "L_STD": 80, "L_MOD": 86, "ROLLING": 10, 
         "L34": 65, "L56": 60
     }
 }
@@ -618,22 +625,21 @@ SCORES_PRESETS = {
 def main():
     uploaded_files = st.file_uploader("📂 Tải file CSV/Excel", type=['xlsx', 'csv'], accept_multiple_files=True)
 
-    # Init State
+    # Init State Default (Mặc định vào Gốc)
     if 'std_0' not in st.session_state:
-        # Default to MT VIP
-        def_vals = SCORES_PRESETS["MT Super VIP (Target < 55s)"] 
+        def_vals = SCORES_PRESETS["Gốc (V24 Standard)"]
         for i in range(11):
             st.session_state[f'std_{i}'] = def_vals["STD"][i]
             st.session_state[f'mod_{i}'] = def_vals["MOD"][i]
-        st.session_state['l_top_12'] = def_vals.get("L_STD", 75)
-        st.session_state['l_mod_1'] = def_vals.get("L_MOD", 68)
-        st.session_state['rolling_window'] = def_vals.get("ROLLING", 12)
+        st.session_state['l_top_12'] = def_vals.get("L_STD", 80)
+        st.session_state['l_mod_1'] = def_vals.get("L_MOD", 86)
+        st.session_state['rolling_window'] = def_vals.get("ROLLING", 10)
         st.session_state['l_top_34'] = def_vals.get("L34", 65)
-        st.session_state['l_top_56'] = def_vals.get("L56", 55)
+        st.session_state['l_top_56'] = def_vals.get("L56", 60)
 
     with st.sidebar:
         st.header("⚙️ Cài đặt")
-        # Sử dụng key để auto-update
+        # Key must match session_state name to enable auto-update
         ROLLING_WINDOW = st.number_input("Chu kỳ xét (Ngày)", min_value=1, key='rolling_window', step=1)
         
         with st.expander("🎚️ 1. Điểm M0-M10 (Cấu hình)", expanded=False):
@@ -641,10 +647,11 @@ def main():
                 choice = st.session_state.preset_choice
                 if choice in SCORES_PRESETS:
                     vals = SCORES_PRESETS[choice]
+                    # Update Score Inputs
                     for i in range(11):
                         st.session_state[f'std_{i}'] = vals["STD"][i]
                         st.session_state[f'mod_{i}'] = vals["MOD"][i]
-                    # Reset toàn bộ limits và rolling window
+                    # Update Config Inputs (Full Auto-Reset)
                     st.session_state['l_top_12'] = vals.get("L_STD", 80)
                     st.session_state['l_mod_1'] = vals.get("L_MOD", 86)
                     st.session_state['rolling_window'] = vals.get("ROLLING", 10)
@@ -654,7 +661,7 @@ def main():
             st.selectbox(
                 "📚 Chọn bộ tham số mẫu:",
                 options=["Tùy chỉnh"] + list(SCORES_PRESETS.keys()),
-                index=2, 
+                index=1, # Default index
                 key="preset_choice",
                 on_change=update_scores
             )
@@ -677,6 +684,7 @@ def main():
         USE_INVERSE = st.checkbox("Chấm Điểm Đảo (Ngược)", value=False)
         
         with st.expander("✂️ Chi tiết cắt Top (V25)", expanded=True):
+            # Keys match session_state names
             L_TOP_12 = st.number_input("Top 1 & 2 lấy:", key='l_top_12', step=1) 
             L_TOP_34 = st.number_input("Top 3 & 4 lấy:", key='l_top_34', step=1) 
             L_TOP_56 = st.number_input("Top 5 & 6 lấy:", key='l_top_56', step=1) 
