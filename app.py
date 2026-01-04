@@ -11,14 +11,14 @@ from functools import lru_cache
 # 1. CẤU HÌNH HỆ THỐNG
 # ==============================================================================
 st.set_page_config(
-    page_title="Quang Pro V40 - Classic Restore", 
-    page_icon="👑", 
+    page_title="Quang Pro V41 - Final Fix", 
+    page_icon="🛡️", 
     layout="wide",
     initial_sidebar_state="collapsed" 
 )
 
-st.title("👑 Quang Handsome: V40 Classic Restore")
-st.caption("🚀 Giao diện Cổ điển (3 Bảng) | Backtest Chi tiết | Săn Kịch Bản")
+st.title("🛡️ Quang Handsome: V41 Final Fix")
+st.caption("🚀 Đã sửa lỗi Săn Kịch Bản (Nhận diện M 1 0) | Logic Gốc 100%")
 
 # Regex & Sets
 RE_NUMS = re.compile(r'\d+')
@@ -254,7 +254,6 @@ def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits
     stats_std = {g: {'wins': 0, 'ranks': []} for g in groups}
     stats_mod = {g: {'wins': 0} for g in groups}
 
-    # Phase 1: Backtest Group
     if not manual_groups:
         past_dates = []
         check_d = target_date - timedelta(days=1)
@@ -309,7 +308,6 @@ def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits
         top6_std = [x[0] for x in final_std[:6]]
         best_mod_grp = sorted(stats_mod.keys(), key=lambda g: (-stats_mod[g]['wins'], g))[0]
     
-    # Phase 2: Get Pools
     hist_series = df[col_hist_used].astype(str).str.upper().replace('S', '6', regex=False)
     hist_series = hist_series.str.replace(r'[^0-9X]', '', regex=True)
     
@@ -431,7 +429,7 @@ def analyze_group_performance(start_date, end_date, cut_limit, score_map, _cache
     return df_rep, pd.DataFrame(detailed_rows)
 
 # ==============================================================================
-# 3. AUTO-HUNTER
+# 4. AUTO-HUNTER (SỬA LỖI M 1 0)
 # ==============================================================================
 
 def analyze_column_ranks(target_date, lookback, _cache, _kq_db):
@@ -441,44 +439,67 @@ def analyze_column_ranks(target_date, lookback, _cache, _kq_db):
         if check_d in _cache and check_d in _kq_db: past_dates.append(check_d)
         check_d -= timedelta(days=1)
         if (target_date - check_d).days > 60: break
+    
     col_hits = Counter()
     if not past_dates: return []
+
     for d in past_dates:
         df = _cache[d]['df']
         kq = _kq_db[d]
-        m_cols = [c for c in df.columns if re.match(r'^M\d+$', c)]
-        for col in m_cols:
-            all_vals = " ".join(df[col].astype(str).tolist())
-            if kq in get_nums(all_vals): col_hits[col] += 1
+        
+        # SỬA LỖI: Quét tất cả cột, tự động clean tên cột "M 1 0" thành "M10" để check
+        for col in df.columns:
+            clean_name = str(col).upper().replace(" ", "")
+            if re.match(r'^M\d+$', clean_name):
+                # Nếu là cột M (M0, M10...), kiểm tra số trúng
+                all_vals = " ".join(df[col].astype(str).tolist())
+                if kq in get_nums(all_vals):
+                    # Lưu lại tên cột đã clean (M10) để thống nhất
+                    col_hits[clean_name] += 1
+            
     return col_hits.most_common()
 
 def generate_smart_scenarios(ranked_cols):
     scenarios = []
+    
+    # Kịch bản 1: Bám Top 2
     s1 = {f"M{i}": 0 for i in range(11)}
     if len(ranked_cols) >= 2:
-        s1[ranked_cols[0][0].replace(" ","")] = 60
-        s1[ranked_cols[1][0].replace(" ","")] = 40
+        # ranked_cols trả về [('M10', 5), ('M5', 3)...] -> Đã sạch
+        s1[ranked_cols[0][0]] = 60
+        s1[ranked_cols[1][0]] = 40
     scenarios.append(("Bám Top 2 (Hot)", s1))
     
+    # Kịch bản 2: Top 5 Phân Bố
     s2 = {f"M{i}": 0 for i in range(11)}
     weights = [50, 40, 30, 20, 10]
     for idx, (col, _) in enumerate(ranked_cols[:5]):
-        if idx < len(weights): s2[col.replace(" ","")] = weights[idx]
+        if idx < len(weights): s2[col] = weights[idx]
     scenarios.append(("Top 5 Phân Bố", s2))
     
+    # Kịch bản 3: Top 8 An Toàn
     s3 = {f"M{i}": 0 for i in range(11)}
     for idx, (col, _) in enumerate(ranked_cols[:8]):
-        s3[col.replace(" ","")] = 20
+        s3[col] = 20
     scenarios.append(("Top 8 An Toàn", s3))
     
+    # Kịch bản 4: Top 1 Gánh Team
     s4 = {f"M{i}": 0 for i in range(11)}
-    if len(ranked_cols) >= 1: s4[ranked_cols[0][0].replace(" ","")] = 100
+    if len(ranked_cols) >= 1: s4[ranked_cols[0][0]] = 100
     scenarios.append(("Top 1 Gánh Team", s4))
+    
     return scenarios
 
 def hunt_best_scenario(target_date, _cache, _kq_db, fixed_limits, min_v, use_inv, max_allowed_nums, progress_bar=None, status_text=None):
     if status_text: status_text.text("🤖 Bước 1/3: Đang phân tích xu hướng...")
     ranked = analyze_column_ranks(target_date, 15, _cache, _kq_db)
+    
+    # Fallback nếu không tìm thấy cột nào (dữ liệu quá lỗi)
+    if not ranked:
+        if status_text: status_text.text("⚠️ Không đọc được cột M nào. Dùng mặc định.")
+        # Giả lập rank để chạy tiếp
+        ranked = [('M10', 10), ('M9', 8), ('M8', 6), ('M5', 5), ('M6', 4)]
+
     scenarios = generate_smart_scenarios(ranked)
     total_steps = len(scenarios)
     results = []
@@ -505,6 +526,7 @@ def hunt_best_scenario(target_date, _cache, _kq_db, fixed_limits, min_v, use_inv
         if valid > 0:
             avg = total_nums / valid
             wr = (wins / valid) * 100
+            # Chỉ lọc trên, không lọc dưới
             if avg <= max_allowed_nums:
                 results.append({"Name": name, "WinRate": wr, "AvgNums": avg, "Scores": score_set})
     
@@ -513,7 +535,7 @@ def hunt_best_scenario(target_date, _cache, _kq_db, fixed_limits, min_v, use_inv
     return results
 
 # ==============================================================================
-# 6. GIAO DIỆN CHÍNH
+# 5. GIAO DIỆN CHÍNH
 # ==============================================================================
 
 SCORES_PRESETS = {
@@ -674,7 +696,7 @@ def main():
 
             with tab4:
                 st.subheader("🏹 Săn Kịch Bản Tối Ưu")
-                st.info("AI tự động phân tích tần suất trúng, tạo ra các chiến thuật và chọn cái tốt nhất.")
+                st.info("AI tự động phân tích tần suất trúng 15 ngày qua, tạo ra các chiến thuật (Bám Top, An Toàn...) và chọn cái tốt nhất.")
                 
                 c1, c2 = st.columns([1, 2])
                 with c1:
@@ -699,7 +721,7 @@ def main():
                     if 'best_scenarios' in st.session_state:
                         scenarios = st.session_state['best_scenarios']
                         if not scenarios:
-                            st.warning("⚠️ Không tìm thấy kịch bản phù hợp. Hãy thử tăng Max Số Lượng.")
+                            st.warning("⚠️ Không tìm thấy kịch bản nào phù hợp tiêu chí số lượng. Hãy tăng 'Max Số Lượng' lên 70 hoặc 75.")
                         else:
                             st.success(f"🎉 Tìm thấy {len(scenarios)} kịch bản tiềm năng!")
                             for idx, sc in enumerate(scenarios):
