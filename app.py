@@ -19,7 +19,7 @@ st.set_page_config(
 st.title("🎯 Quang Handsome: V29 Ultimate Custom")
 st.caption("🚀 Final 4 = Gốc + Smart 58 | Core Optimized | 100% Deterministic Logic")
 
-# Regex & Sets
+# Regex & Sets (Tối ưu hiệu suất xử lý chuỗi)
 RE_NUMS = re.compile(r'\d+')
 RE_CLEAN_SCORE = re.compile(r'[^A-Z0-9]')
 RE_ISO_DATE = re.compile(r'(20\d{2})[\.\-/](\d{1,2})[\.\-/](\d{1,2})')
@@ -32,6 +32,7 @@ BAD_KEYWORDS = frozenset(['N', 'NGHI', 'SX', 'XIT', 'MISS', 'TRUOT', 'NGHỈ', '
 
 @lru_cache(maxsize=10000)
 def get_nums(s):
+    """Lấy số từ chuỗi, bỏ qua các từ khóa xấu."""
     if pd.isna(s): return []
     s_str = str(s).strip()
     if not s_str: return []
@@ -42,6 +43,7 @@ def get_nums(s):
 
 @lru_cache(maxsize=1000)
 def get_col_score(col_name, mapping_tuple):
+    """Lấy điểm số cấu hình cho từng cột M."""
     # Fix lỗi M 1 0 (có khoảng trắng)
     clean = RE_CLEAN_SCORE.sub('', str(col_name).upper().replace(' ', ''))
     mapping = dict(mapping_tuple)
@@ -54,6 +56,7 @@ def get_col_score(col_name, mapping_tuple):
     return 0
 
 def parse_date_smart(col_str, f_m, f_y):
+    """Phân tích ngày tháng từ tên cột."""
     s = str(col_str).strip().upper()
     s = s.replace('NGAY', '').replace('NGÀY', '').strip()
     match_iso = RE_ISO_DATE.search(s)
@@ -74,6 +77,7 @@ def parse_date_smart(col_str, f_m, f_y):
     return None
 
 def find_header_row(df_preview):
+    """Tìm dòng chứa tiêu đề cột."""
     keywords = ["STT", "MEMBER", "THÀNH VIÊN", "TV TOP", "DANH SÁCH", "HỌ VÀ TÊN", "NICK"]
     for idx, row in df_preview.iterrows():
         row_str = str(row.values).upper()
@@ -120,6 +124,7 @@ def extract_meta_from_filename(filename):
 
 @st.cache_data(ttl=600)
 def load_data_v24(files):
+    """Đọc dữ liệu từ file upload và lưu vào cache."""
     cache = {} 
     kq_db = {}
     err_logs = []
@@ -545,7 +550,7 @@ def analyze_group_performance(start_date, end_date, cut_limit, score_map, data_c
     detailed_rows = [] 
     
     # Pre-calc map
-    score_map_dict = {f"M{i}": v for i, v in enumerate(list(score_map.values()))} # Simplify for demo, real use cache
+    score_map_dict = {f"M{i}": v for i, v in enumerate(list(score_map.values()))} 
 
     for d in reversed(dates):
         day_record = {"Ngày": d.strftime("%d/%m"), "KQ": kq_db.get(d, "N/A")}
@@ -574,7 +579,7 @@ def analyze_group_performance(start_date, end_date, cut_limit, score_map, data_c
         except: continue
         
         kq = kq_db[d]
-        d_p_map = {}; d_s_map = {} # Only need 1 map for analysis really
+        d_p_map = {}; d_s_map = {} 
         for col in df.columns:
             s_p = get_col_score(col, score_map_tuple)
             if s_p > 0: d_p_map[col] = s_p
@@ -582,7 +587,7 @@ def analyze_group_performance(start_date, end_date, cut_limit, score_map, data_c
         for g in grp_stats:
             mask = hist_series == g.upper()
             valid_mems = df[mask]
-            # Reuse fast function with dummy secondary map
+            
             top_list = fast_get_top_nums(valid_mems, d_p_map, d_p_map, cut_limit, min_v, inverse)
             top_set = set(top_list)
             grp_stats[g]['last_pred'] = sorted(top_list)
@@ -636,6 +641,10 @@ SCORES_PRESETS = {
     },
     "Lai tạo (Hybrid - Thực chiến)": {
         "STD": [0, 2, 4, 6, 12, 16, 20, 25, 30, 32, 35],
+        "MOD": [0, 5, 10, 15, 30, 30, 50, 35, 25, 25, 40]
+    },
+    "Miền Nam (Theo Ảnh)": {
+        "STD": [50, 8, 9, 10, 10, 30, 40, 30, 25, 30, 30],
         "MOD": [0, 5, 10, 15, 30, 30, 50, 35, 25, 25, 40]
     }
 }
