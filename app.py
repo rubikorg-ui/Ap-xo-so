@@ -4,6 +4,7 @@ import re
 import datetime
 import time
 import math
+import random
 from datetime import timedelta
 from collections import Counter
 from functools import lru_cache
@@ -12,14 +13,14 @@ from functools import lru_cache
 # 1. CẤU HÌNH HỆ THỐNG
 # ==============================================================================
 st.set_page_config(
-    page_title="Quang Pro V43 - Safety AI", 
-    page_icon="🛡️", 
+    page_title="Quang Pro V44 - Chaos AI", 
+    page_icon="⚡", 
     layout="wide",
     initial_sidebar_state="collapsed" 
 )
 
-st.title("🛡️ Quang Handsome: V43 Safety Core")
-st.caption("🚀 Fix lỗi M=0 | Auto-Fallback System | Logic Gốc 100% | Dynamic AI")
+st.title("⚡ Quang Handsome: V44 Chaos Core")
+st.caption("🚀 Fix lỗi trùng lặp | Sensitive AI (3 ngày) | Chaos Factor | Logic Gốc 100%")
 
 # Regex & Sets
 RE_NUMS = re.compile(r'\d+')
@@ -430,20 +431,22 @@ def analyze_group_performance(start_date, end_date, cut_limit, score_map, _cache
     return df_rep, pd.DataFrame(detailed_rows)
 
 # ==============================================================================
-# 3. AUTO-HUNTER PRO (NÂNG CẤP: DYNAMIC AI + FIX ZERO)
+# 3. AUTO-HUNTER PRO (V44: CHAOS AI + DYNAMIC FALLBACK)
 # ==============================================================================
 
 def analyze_market_trends(target_date, _cache, _kq_db):
-    """Phân tích sâu dữ liệu: Trả về chi tiết để tính toán linh động"""
-    SHORT_TERM = 3; LONG_TERM = 18
+    """Phân tích sâu dữ liệu: Hạ chuẩn xuống 3 ngày (Sensitive Mode)"""
+    SHORT_TERM = 3; LONG_TERM = 5 # [FIX] Hạ chuẩn từ 18 xuống 5 ngày để bắt sóng ngắn
     past_dates = []
     check_d = target_date - timedelta(days=1)
+    
+    # Lấy tối đa LONG_TERM ngày có KQ
     while len(past_dates) < LONG_TERM:
         if check_d in _cache and check_d in _kq_db: past_dates.append(check_d)
         check_d -= timedelta(days=1)
         if (target_date - check_d).days > 60: break
     
-    # [FIX] Nếu không tìm thấy ngày nào có KQ, trả về rỗng để kích hoạt chế độ Fallback
+    # Nếu không có ngày nào, trả về rỗng để Fallback lo
     if not past_dates: return {}
 
     col_stats = {}
@@ -454,31 +457,41 @@ def analyze_market_trends(target_date, _cache, _kq_db):
         recency_weight = 1 / (0.15 * idx + 1)
         
         for col in df.columns:
-            # [FIX] Nới lỏng regex để bắt được M 1, M-01...
             clean_name = str(col).upper().replace(" ", "").replace("-", "")
+            # Regex lỏng hơn để bắt mọi cột M
             if 'M' in clean_name and any(char.isdigit() for char in clean_name):
                 if clean_name not in col_stats:
-                    col_stats[clean_name] = {'wins': 0, 'recency_score': 0.0, 'short_wins': 0, 'last_seen': 99}
+                    col_stats[clean_name] = {'wins': 0, 'recency_score': 0.0, 'short_wins': 0}
                 
                 all_vals = " ".join(df[col].astype(str).tolist())
                 nums_in_col = get_nums(all_vals)
                 if kq in nums_in_col:
                     col_stats[clean_name]['wins'] += 1
                     col_stats[clean_name]['recency_score'] += recency_weight
-                    col_stats[clean_name]['last_seen'] = idx
                     if is_short: col_stats[clean_name]['short_wins'] += 1
 
     return col_stats
 
-def create_dynamic_distribution(col_stats, strategy_type, top_k=None):
+def get_dynamic_fallback(target_date):
     """
-    Tạo bộ điểm LINH ĐỘNG. Nếu không có dữ liệu, trả về Mặc định (Safety).
+    [NEW] Fallback thông minh: Thay đổi chiến thuật theo ngày để tránh trùng lặp
     """
-    # Bộ điểm mặc định (Fallback)
-    fallback_scores = {'M10': 50, 'M9': 30, 'M8': 25, 'M7': 20, 'M6': 15, 'M5': 10, 'M4': 5, 'M3':0, 'M2':0, 'M1':0, 'M0':0}
+    day_mod = target_date.day % 3
+    if day_mod == 0:
+        # Chiến thuật 1: Tập trung Top đầu (M10, M9)
+        return {'M10': 50, 'M9': 40, 'M8': 30, 'M7': 20, 'M6': 10, 'M5':0, 'M4':0}
+    elif day_mod == 1:
+        # Chiến thuật 2: Tập trung Top giữa (M7, M6, M5)
+        return {'M10': 20, 'M9': 20, 'M8': 40, 'M7': 50, 'M6': 50, 'M5': 40, 'M4': 20}
+    else:
+        # Chiến thuật 3: Rải đều (Flat)
+        return {f'M{i}': 30 for i in range(11)}
+
+def create_dynamic_distribution(col_stats, strategy_type, target_date, top_k=None):
+    # [FIX] Dùng Dynamic Fallback thay vì Static
     base_scores = {f"M{i}": 0 for i in range(11)}
-    
-    # [FIX] Nếu col_stats rỗng, trả về fallback ngay
+    fallback_scores = get_dynamic_fallback(target_date)
+
     if not col_stats: return fallback_scores
 
     valid_items = [k for k in col_stats.items() if k[1]['wins'] > 0]
@@ -490,54 +503,55 @@ def create_dynamic_distribution(col_stats, strategy_type, top_k=None):
     else: 
         sorted_items = sorted(valid_items, key=lambda x: x[1]['wins'], reverse=True)
 
-    # [FIX] Nếu không tìm thấy cột nào trúng, trả về fallback
     if not sorted_items: return fallback_scores
 
     if top_k: sorted_items = sorted_items[:top_k]
     top_cols = [x[0] for x in sorted_items]
     
-    # Logic chia điểm
+    # [NEW] Chaos Factor: Thêm biến động ngẫu nhiên +/- 3 điểm để phá vỡ sự trùng lặp
+    chaos = random.randint(-3, 3) 
+
     if "PROPORTIONAL" in strategy_type:
         total_wins = sum([col_stats[c]['wins'] for c in top_cols])
         if total_wins > 0:
             for c in top_cols:
                 w = col_stats[c]['wins']
-                score = int((w / total_wins) * 150) 
-                base_scores[c] = min(60, score)
+                score = int((w / total_wins) * 150) + chaos
+                base_scores[c] = max(0, min(65, score))
     elif "LOGARITHMIC" in strategy_type:
         for i, c in enumerate(top_cols):
-            score = 55 - (15 * math.log(i + 1))
+            score = 55 - (15 * math.log(i + 1)) + chaos
             base_scores[c] = int(max(0, score))
     elif "EXPONENTIAL" in strategy_type:
         for i, c in enumerate(top_cols):
-            score = 60 * (0.6 ** i)
-            base_scores[c] = int(score)
+            score = (60 * (0.6 ** i)) + chaos
+            base_scores[c] = int(max(0, score))
     elif "FIBONACCI" in strategy_type:
         weights = [55, 34, 21, 13, 8, 5, 3, 2, 1, 1]
         for idx, w in enumerate(weights):
-            if idx < len(top_cols): base_scores[top_cols[idx]] = w
+            if idx < len(top_cols): base_scores[top_cols[idx]] = max(0, w + chaos)
     elif "STEP_LADDER" in strategy_type:
-        curr = 50
+        curr = 50 + chaos
         for c in top_cols:
             base_scores[c] = curr
             curr = max(0, curr - 5)
 
     return base_scores
 
-def generate_dynamic_scenarios(col_stats):
+def generate_dynamic_scenarios(col_stats, target_date):
     scenarios = []
     # 1. NHÓM HOT
-    scenarios.append({"Name": "🔥 Hot: Tỉ Lệ Thực", "Desc": "Điểm chia theo % độ Hot thực tế.", "Scores": create_dynamic_distribution(col_stats, "HOT_PROPORTIONAL", top_k=5)})
-    scenarios.append({"Name": "🔥 Hot: Sát Phạt", "Desc": "Dồn 60% lực cho Top 1 Hot.", "Scores": create_dynamic_distribution(col_stats, "HOT_EXPONENTIAL", top_k=4)})
-    scenarios.append({"Name": "🔥 Hot: Fibonacci", "Desc": "Chia điểm theo dãy vàng Fibo.", "Scores": create_dynamic_distribution(col_stats, "HOT_FIBONACCI", top_k=6)})
+    scenarios.append({"Name": "🔥 Hot: Tỉ Lệ Thực", "Desc": "Điểm chia theo % độ Hot thực tế.", "Scores": create_dynamic_distribution(col_stats, "HOT_PROPORTIONAL", target_date, top_k=5)})
+    scenarios.append({"Name": "🔥 Hot: Sát Phạt", "Desc": "Dồn 60% lực cho Top 1 Hot.", "Scores": create_dynamic_distribution(col_stats, "HOT_EXPONENTIAL", target_date, top_k=4)})
+    scenarios.append({"Name": "🔥 Hot: Fibonacci", "Desc": "Chia điểm theo dãy vàng Fibo.", "Scores": create_dynamic_distribution(col_stats, "HOT_FIBONACCI", target_date, top_k=6)})
     # 2. NHÓM STABLE
-    scenarios.append({"Name": "🛡️ Stable: Logarit", "Desc": "San sẻ điểm, dàn dày an toàn.", "Scores": create_dynamic_distribution(col_stats, "STABLE_LOGARITHMIC", top_k=8)})
-    scenarios.append({"Name": "🛡️ Stable: Bậc Thang", "Desc": "Giảm đều 5 điểm.", "Scores": create_dynamic_distribution(col_stats, "STABLE_STEP_LADDER", top_k=10)})
+    scenarios.append({"Name": "🛡️ Stable: Logarit", "Desc": "San sẻ điểm, dàn dày an toàn.", "Scores": create_dynamic_distribution(col_stats, "STABLE_LOGARITHMIC", target_date, top_k=8)})
+    scenarios.append({"Name": "🛡️ Stable: Bậc Thang", "Desc": "Giảm đều 5 điểm.", "Scores": create_dynamic_distribution(col_stats, "STABLE_STEP_LADDER", target_date, top_k=10)})
     # 3. SPECIAL
-    scenarios.append({"Name": "📈 Sóng Hồi", "Desc": "Bắt cột từng trúng nhiều nhưng vừa xịt.", "Scores": create_dynamic_distribution(col_stats, "RECOVERY_PROPORTIONAL", top_k=5)})
+    scenarios.append({"Name": "📈 Sóng Hồi", "Desc": "Bắt cột từng trúng nhiều nhưng vừa xịt.", "Scores": create_dynamic_distribution(col_stats, "RECOVERY_PROPORTIONAL", target_date, top_k=5)})
     # 4. HYBRID
-    s_hot = create_dynamic_distribution(col_stats, "HOT_FIBONACCI", top_k=3)
-    s_stable = create_dynamic_distribution(col_stats, "STABLE_LOGARITHMIC", top_k=5)
+    s_hot = create_dynamic_distribution(col_stats, "HOT_FIBONACCI", target_date, top_k=3)
+    s_stable = create_dynamic_distribution(col_stats, "STABLE_LOGARITHMIC", target_date, top_k=5)
     s_hybrid = {k: max(s_hot.get(k,0), s_stable.get(k,0)) for k in s_hot}
     for k, v in s_stable.items(): 
         if k not in s_hybrid: s_hybrid[k] = v
@@ -546,14 +560,14 @@ def generate_dynamic_scenarios(col_stats):
     return scenarios
 
 def hunt_best_scenario(target_date, _cache, _kq_db, fixed_limits, min_v, use_inv, max_allowed_nums, progress_bar=None, status_text=None):
-    if status_text: status_text.text("📊 Bước 1/3: Phân tích Dữ Liệu Động...")
+    if status_text: status_text.text("📊 Bước 1/3: Phân tích Dữ Liệu & Chaos Factor...")
     col_stats = analyze_market_trends(target_date, _cache, _kq_db)
     
-    # [FIX] Nếu không có thống kê, giả lập dữ liệu để không lỗi
     if not col_stats and status_text:
-        status_text.warning("⚠️ Không tìm thấy lịch sử KQ. Đang dùng chế độ Fallback...")
+        status_text.warning("⚠️ Ít dữ liệu. Kích hoạt 'Dynamic Fallback' để tạo biến thiên.")
     
-    scenarios = generate_dynamic_scenarios(col_stats)
+    # Truyền target_date vào để tính toán Fallback theo ngày
+    scenarios = generate_dynamic_scenarios(col_stats, target_date)
     total_steps = len(scenarios)
     results = []
     
@@ -564,7 +578,6 @@ def hunt_best_scenario(target_date, _cache, _kq_db, fixed_limits, min_v, use_inv
         check -= timedelta(days=1)
         if (target_date - check).days > 30: break
     
-    # [FIX] Nếu không có ngày test nào (file mới tinh), dùng chính ngày target để giả lập chạy code
     if not test_dates: test_dates = [target_date] 
 
     for idx, sc in enumerate(scenarios):
@@ -576,7 +589,6 @@ def hunt_best_scenario(target_date, _cache, _kq_db, fixed_limits, min_v, use_inv
             res = calculate_v24_logic_only(d, 3, _cache, _kq_db, fixed_limits, min_v, sc['Scores'], sc['Scores'], use_inv, None)
             if res:
                 t = res['dan_final']
-                # Chỉ tính win nếu có KQ thật
                 if d in _kq_db and _kq_db[d] in t: wins += 1
                 total_nums += len(t); valid += 1
         
@@ -584,7 +596,7 @@ def hunt_best_scenario(target_date, _cache, _kq_db, fixed_limits, min_v, use_inv
             avg = total_nums / valid
             wr = (wins / valid) * 100 if valid > 0 else 0
             eff_score = wr - (avg * 0.45) 
-            if avg <= max_allowed_nums + 5: # Nới lỏng chút
+            if avg <= max_allowed_nums + 5:
                 results.append({"Name": sc['Name'], "Desc": sc['Desc'], "WinRate": wr, "AvgNums": avg, "EffScore": eff_score, "Scores": sc['Scores']})
     
     if status_text: status_text.text("✅ Hoàn tất!")
@@ -763,8 +775,8 @@ def main():
                         st.dataframe(df_detail, use_container_width=True)
 
             with tab4:
-                st.subheader("🏹 Săn Kịch Bản (Dynamic AI)")
-                st.info("AI sử dụng thuật toán Dynamic Scoring (Tự động chuyển chế độ Safety nếu thiếu dữ liệu).")
+                st.subheader("🏹 Săn Kịch Bản (Chaos AI)")
+                st.info("AI V44: Sử dụng Chaos Factor & Dynamic Fallback để phá vỡ thế bế tắc 20%.")
                 
                 c1, c2 = st.columns([1, 2])
                 with c1:
@@ -772,7 +784,7 @@ def main():
                     max_nums_hunter = st.slider("Max Số Lượng:", 40, 80, 65, key="mx_hunter")
                     
                     if st.button("🏹 BẮT ĐẦU SĂN", type="primary"):
-                        st.toast("🚀 AI đang phân tích dữ liệu...") 
+                        st.toast("🚀 AI đang phân tích (Chaos Mode)...") 
                         prog_bar = st.progress(0)
                         status_txt = st.empty()
                         
