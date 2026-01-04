@@ -13,24 +13,25 @@ from functools import lru_cache
 # 1. CẤU HÌNH HỆ THỐNG
 # ==============================================================================
 st.set_page_config(
-    page_title="Quang Pro V44 - Chaos AI", 
-    page_icon="⚡", 
+    page_title="Quang Pro V45 - Deep Scan", 
+    page_icon="👁️", 
     layout="wide",
     initial_sidebar_state="collapsed" 
 )
 
-st.title("⚡ Quang Handsome: V44 Chaos Core")
-st.caption("🚀 Fix lỗi trùng lặp | Sensitive AI (3 ngày) | Chaos Factor | Logic Gốc 100%")
+st.title("👁️ Quang Handsome: V45 Deep Scan")
+st.caption("🚀 Fix lỗi không đọc được KQ | Hỗ trợ từ khóa ĐB, GĐB... | Kiểm tra dữ liệu thô")
 
 # Regex & Sets
 RE_NUMS = re.compile(r'\d+')
 RE_CLEAN_SCORE = re.compile(r'[^A-Z0-9]')
 RE_ISO_DATE = re.compile(r'(20\d{2})[\.\-/](\d{1,2})[\.\-/](\d{1,2})')
 RE_SLASH_DATE = re.compile(r'(\d{1,2})[\.\-/](\d{1,2})')
-BAD_KEYWORDS = frozenset(['N', 'NGHI', 'SX', 'XIT', 'MISS', 'TRUOT', 'NGHỈ', 'LỖI'])
+# [NÂNG CẤP] Thêm từ khóa loại trừ mạnh hơn
+BAD_KEYWORDS = frozenset(['N', 'NGHI', 'SX', 'XIT', 'MISS', 'TRUOT', 'NGHỈ', 'LỖI', 'QUAY', 'THU'])
 
 # ==============================================================================
-# 2. CORE FUNCTIONS (LOGIC GỐC - GIỮ NGUYÊN 100%)
+# 2. CORE FUNCTIONS
 # ==============================================================================
 
 @lru_cache(maxsize=10000)
@@ -45,11 +46,13 @@ def get_nums(s):
 
 @lru_cache(maxsize=1000)
 def get_col_score(col_name, mapping_tuple):
-    clean = RE_CLEAN_SCORE.sub('', str(col_name).upper().replace(' ', ''))
+    # [NÂNG CẤP] Làm sạch tên cột mạnh tay hơn để bắt M-1, M 1
+    clean = RE_CLEAN_SCORE.sub('', str(col_name).upper().replace(' ', '').replace('-', '').replace('_', ''))
     mapping = dict(mapping_tuple)
     if 'M10' in clean: return mapping.get('M10', 0)
     for key, score in mapping.items():
         if key in clean:
+            # Logic tránh nhầm lẫn M1 với M10
             if key == 'M1' and 'M10' in clean: continue
             if key == 'M0' and 'M10' in clean: continue
             return score
@@ -75,7 +78,7 @@ def parse_date_smart(col_str, f_m, f_y):
     return None
 
 def find_header_row(df_preview):
-    keywords = ["STT", "MEMBER", "THÀNH VIÊN", "TV TOP", "DANH SÁCH", "HỌ VÀ TÊN", "NICK"]
+    keywords = ["STT", "MEMBER", "THÀNH VIÊN", "TV TOP", "DANH SÁCH", "HỌ VÀ TÊN", "NICK", "NAME", "TÊN"]
     for idx, row in df_preview.iterrows():
         row_str = str(row.values).upper()
         if any(k in row_str for k in keywords):
@@ -135,6 +138,7 @@ def load_data_v24(files):
                         preview = pd.read_excel(xls, sheet_name=sheet, header=None, nrows=20, engine='openpyxl')
                         h_row = find_header_row(preview)
                         df = pd.read_excel(xls, sheet_name=sheet, header=h_row, engine='openpyxl')
+                        # [NÂNG CẤP] Chuẩn hóa tên cột
                         df.columns = [str(c).strip().upper().replace('M 1 0', 'M10') for c in df.columns]
                         dfs_to_process.append((s_date, df))
                 file_status.append(f"✅ Excel: {file.name}")
@@ -166,13 +170,18 @@ def load_data_v24(files):
                     d_obj = parse_date_smart(col, f_m, f_y)
                     if d_obj: hist_map[d_obj] = col
                 kq_row = None
+                
+                # [NÂNG CẤP QUAN TRỌNG] Mở rộng từ khóa tìm KQ
                 if not df.empty:
-                    for c_idx in range(min(2, len(df.columns))):
+                    # Quét 3 cột đầu tiên để tìm nhãn KQ
+                    for c_idx in range(min(3, len(df.columns))):
                         col_check = df.columns[c_idx]
-                        mask_kq = df[col_check].astype(str).str.upper().str.contains(r'KQ|KẾT QUẢ')
+                        # Thêm ĐB, GĐB, DB, DAC BIET vào regex
+                        mask_kq = df[col_check].astype(str).str.upper().str.contains(r'KQ|KẾT|ĐB|DB|GĐB|DAC BIET|GIAI DB')
                         if mask_kq.any():
                             kq_row = df[mask_kq].iloc[0]
                             break
+                
                 if kq_row is not None:
                     for d_val, c_name in hist_map.items():
                         val = str(kq_row[c_name])
@@ -431,22 +440,20 @@ def analyze_group_performance(start_date, end_date, cut_limit, score_map, _cache
     return df_rep, pd.DataFrame(detailed_rows)
 
 # ==============================================================================
-# 3. AUTO-HUNTER PRO (V44: CHAOS AI + DYNAMIC FALLBACK)
+# 3. AUTO-HUNTER PRO (V45: DEEP SCAN)
 # ==============================================================================
 
 def analyze_market_trends(target_date, _cache, _kq_db):
     """Phân tích sâu dữ liệu: Hạ chuẩn xuống 3 ngày (Sensitive Mode)"""
-    SHORT_TERM = 3; LONG_TERM = 5 # [FIX] Hạ chuẩn từ 18 xuống 5 ngày để bắt sóng ngắn
+    SHORT_TERM = 3; LONG_TERM = 5 
     past_dates = []
     check_d = target_date - timedelta(days=1)
     
-    # Lấy tối đa LONG_TERM ngày có KQ
     while len(past_dates) < LONG_TERM:
         if check_d in _cache and check_d in _kq_db: past_dates.append(check_d)
         check_d -= timedelta(days=1)
         if (target_date - check_d).days > 60: break
     
-    # Nếu không có ngày nào, trả về rỗng để Fallback lo
     if not past_dates: return {}
 
     col_stats = {}
@@ -457,8 +464,8 @@ def analyze_market_trends(target_date, _cache, _kq_db):
         recency_weight = 1 / (0.15 * idx + 1)
         
         for col in df.columns:
-            clean_name = str(col).upper().replace(" ", "").replace("-", "")
-            # Regex lỏng hơn để bắt mọi cột M
+            # [NÂNG CẤP] Nhận diện cột M linh hoạt hơn (M-01, M_01...)
+            clean_name = str(col).upper().replace(" ", "").replace("-", "").replace("_", "")
             if 'M' in clean_name and any(char.isdigit() for char in clean_name):
                 if clean_name not in col_stats:
                     col_stats[clean_name] = {'wins': 0, 'recency_score': 0.0, 'short_wins': 0}
@@ -473,22 +480,15 @@ def analyze_market_trends(target_date, _cache, _kq_db):
     return col_stats
 
 def get_dynamic_fallback(target_date):
-    """
-    [NEW] Fallback thông minh: Thay đổi chiến thuật theo ngày để tránh trùng lặp
-    """
     day_mod = target_date.day % 3
     if day_mod == 0:
-        # Chiến thuật 1: Tập trung Top đầu (M10, M9)
         return {'M10': 50, 'M9': 40, 'M8': 30, 'M7': 20, 'M6': 10, 'M5':0, 'M4':0}
     elif day_mod == 1:
-        # Chiến thuật 2: Tập trung Top giữa (M7, M6, M5)
         return {'M10': 20, 'M9': 20, 'M8': 40, 'M7': 50, 'M6': 50, 'M5': 40, 'M4': 20}
     else:
-        # Chiến thuật 3: Rải đều (Flat)
         return {f'M{i}': 30 for i in range(11)}
 
 def create_dynamic_distribution(col_stats, strategy_type, target_date, top_k=None):
-    # [FIX] Dùng Dynamic Fallback thay vì Static
     base_scores = {f"M{i}": 0 for i in range(11)}
     fallback_scores = get_dynamic_fallback(target_date)
 
@@ -508,7 +508,6 @@ def create_dynamic_distribution(col_stats, strategy_type, target_date, top_k=Non
     if top_k: sorted_items = sorted_items[:top_k]
     top_cols = [x[0] for x in sorted_items]
     
-    # [NEW] Chaos Factor: Thêm biến động ngẫu nhiên +/- 3 điểm để phá vỡ sự trùng lặp
     chaos = random.randint(-3, 3) 
 
     if "PROPORTIONAL" in strategy_type:
@@ -540,16 +539,13 @@ def create_dynamic_distribution(col_stats, strategy_type, target_date, top_k=Non
 
 def generate_dynamic_scenarios(col_stats, target_date):
     scenarios = []
-    # 1. NHÓM HOT
     scenarios.append({"Name": "🔥 Hot: Tỉ Lệ Thực", "Desc": "Điểm chia theo % độ Hot thực tế.", "Scores": create_dynamic_distribution(col_stats, "HOT_PROPORTIONAL", target_date, top_k=5)})
     scenarios.append({"Name": "🔥 Hot: Sát Phạt", "Desc": "Dồn 60% lực cho Top 1 Hot.", "Scores": create_dynamic_distribution(col_stats, "HOT_EXPONENTIAL", target_date, top_k=4)})
     scenarios.append({"Name": "🔥 Hot: Fibonacci", "Desc": "Chia điểm theo dãy vàng Fibo.", "Scores": create_dynamic_distribution(col_stats, "HOT_FIBONACCI", target_date, top_k=6)})
-    # 2. NHÓM STABLE
     scenarios.append({"Name": "🛡️ Stable: Logarit", "Desc": "San sẻ điểm, dàn dày an toàn.", "Scores": create_dynamic_distribution(col_stats, "STABLE_LOGARITHMIC", target_date, top_k=8)})
     scenarios.append({"Name": "🛡️ Stable: Bậc Thang", "Desc": "Giảm đều 5 điểm.", "Scores": create_dynamic_distribution(col_stats, "STABLE_STEP_LADDER", target_date, top_k=10)})
-    # 3. SPECIAL
     scenarios.append({"Name": "📈 Sóng Hồi", "Desc": "Bắt cột từng trúng nhiều nhưng vừa xịt.", "Scores": create_dynamic_distribution(col_stats, "RECOVERY_PROPORTIONAL", target_date, top_k=5)})
-    # 4. HYBRID
+    
     s_hot = create_dynamic_distribution(col_stats, "HOT_FIBONACCI", target_date, top_k=3)
     s_stable = create_dynamic_distribution(col_stats, "STABLE_LOGARITHMIC", target_date, top_k=5)
     s_hybrid = {k: max(s_hot.get(k,0), s_stable.get(k,0)) for k in s_hot}
@@ -560,13 +556,12 @@ def generate_dynamic_scenarios(col_stats, target_date):
     return scenarios
 
 def hunt_best_scenario(target_date, _cache, _kq_db, fixed_limits, min_v, use_inv, max_allowed_nums, progress_bar=None, status_text=None):
-    if status_text: status_text.text("📊 Bước 1/3: Phân tích Dữ Liệu & Chaos Factor...")
+    if status_text: status_text.text("📊 Bước 1/3: Quét dữ liệu Deep Scan...")
     col_stats = analyze_market_trends(target_date, _cache, _kq_db)
     
     if not col_stats and status_text:
-        status_text.warning("⚠️ Ít dữ liệu. Kích hoạt 'Dynamic Fallback' để tạo biến thiên.")
+        status_text.warning("⚠️ Vẫn chưa tìm thấy dữ liệu KQ. Hệ thống sẽ dùng Fallback.")
     
-    # Truyền target_date vào để tính toán Fallback theo ngày
     scenarios = generate_dynamic_scenarios(col_stats, target_date)
     total_steps = len(scenarios)
     results = []
@@ -690,7 +685,7 @@ def main():
             limit_cfg = {'l12': L_TOP_12, 'l34': L_TOP_34, 'l56': L_TOP_56, 'mod': LIMIT_MODIFIED}
             last_d = max(data_cache.keys())
             
-            tab1, tab2, tab3, tab4 = st.tabs(["📊 DỰ ĐOÁN", "🔙 BACKTEST", "🔍 MATRIX", "🏹 SĂN KỊCH BẢN (AI)"])
+            tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 DỰ ĐOÁN", "🔙 BACKTEST", "🔍 MATRIX", "🏹 SĂN KỊCH BẢN", "👁️ KIỂM TRA"])
             
             with tab1:
                 st.subheader("Dự đoán thủ công (3 Bảng)")
@@ -775,8 +770,8 @@ def main():
                         st.dataframe(df_detail, use_container_width=True)
 
             with tab4:
-                st.subheader("🏹 Săn Kịch Bản (Chaos AI)")
-                st.info("AI V44: Sử dụng Chaos Factor & Dynamic Fallback để phá vỡ thế bế tắc 20%.")
+                st.subheader("🏹 Săn Kịch Bản (Deep Scan AI)")
+                st.info("V45: Cơ chế Deep Scan đọc KQ từ mọi định dạng (ĐB, GĐB, KẾT QUẢ...).")
                 
                 c1, c2 = st.columns([1, 2])
                 with c1:
@@ -784,7 +779,7 @@ def main():
                     max_nums_hunter = st.slider("Max Số Lượng:", 40, 80, 65, key="mx_hunter")
                     
                     if st.button("🏹 BẮT ĐẦU SĂN", type="primary"):
-                        st.toast("🚀 AI đang phân tích (Chaos Mode)...") 
+                        st.toast("🚀 Deep Scan đang hoạt động...") 
                         prog_bar = st.progress(0)
                         status_txt = st.empty()
                         
@@ -801,7 +796,7 @@ def main():
                     if 'best_scenarios' in st.session_state:
                         scenarios = st.session_state['best_scenarios']
                         if not scenarios:
-                            st.warning("⚠️ Không tìm thấy kịch bản phù hợp tiêu chí. Hãy tăng 'Max Số Lượng'.")
+                            st.warning("⚠️ Không tìm thấy kịch bản phù hợp. Hãy kiểm tra Tab 'KIỂM TRA' xem có dữ liệu KQ không!")
                         else:
                             st.success(f"🎉 Tìm thấy {len(scenarios)} chiến thuật tiềm năng!")
                             for idx, sc in enumerate(scenarios):
@@ -811,6 +806,18 @@ def main():
                                     st.write(f"**Hiệu suất (Score):** {sc['EffScore']:.1f}")
                                     st.json(sc['Scores'])
                                     st.button(f"👉 Áp dụng #{idx+1}", key=f"apply_{idx}", on_click=apply_hunter_callback, args=(sc['Scores'],))
+
+            with tab5:
+                st.subheader("👁️ Kiểm Tra Dữ Liệu (Debug)")
+                st.info("Kiểm tra xem Tool có đọc đúng KQ và các cột M của bạn không.")
+                if not kq_db:
+                    st.error("❌ Không tìm thấy bất kỳ KQ (Kết Quả) nào! Hãy kiểm tra file xem có cột nào tên là 'KQ', 'ĐB', 'GĐB' không.")
+                else:
+                    st.success(f"✅ Đã tìm thấy {len(kq_db)} ngày có kết quả.")
+                    debug_data = []
+                    for d in sorted(kq_db.keys(), reverse=True):
+                        debug_data.append({"Ngày": d.strftime("%d/%m/%Y"), "KQ (Tool Đọc Được)": kq_db[d]})
+                    st.dataframe(pd.DataFrame(debug_data).head(20), use_container_width=True)
 
 if __name__ == "__main__":
     main()
