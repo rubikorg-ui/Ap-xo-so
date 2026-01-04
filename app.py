@@ -17,7 +17,7 @@ st.set_page_config(
 )
 
 st.title("🎯 Quang Handsome: V29 Ultimate Custom")
-st.caption("🚀 Final 4 = Gốc + Smart 58 | Core Optimized | 100% Deterministic Logic")
+st.caption("🚀 Final 6 = Gốc + Smart 58 | MT & MN Super VIP Presets | Auto-Config")
 
 # Regex & Sets
 RE_NUMS = re.compile(r'\d+')
@@ -544,9 +544,6 @@ def analyze_group_performance(start_date, end_date, cut_limit, score_map, data_c
     grp_stats = {f"{i}x": {'wins': 0, 'ranks': [], 'history': [], 'last_pred': []} for i in range(10)}
     detailed_rows = [] 
     
-    # Pre-calc map
-    score_map_dict = {f"M{i}": v for i, v in enumerate(list(score_map.values()))} # Simplify for demo, real use cache
-
     for d in reversed(dates):
         day_record = {"Ngày": d.strftime("%d/%m"), "KQ": kq_db.get(d, "N/A")}
         if d not in kq_db or d not in data_cache: 
@@ -582,7 +579,6 @@ def analyze_group_performance(start_date, end_date, cut_limit, score_map, data_c
         for g in grp_stats:
             mask = hist_series == g.upper()
             valid_mems = df[mask]
-            # Reuse fast function with dummy secondary map
             top_list = fast_get_top_nums(valid_mems, d_p_map, d_p_map, cut_limit, min_v, inverse)
             top_set = set(top_list)
             grp_stats[g]['last_pred'] = sorted(top_list)
@@ -622,36 +618,45 @@ def analyze_group_performance(start_date, end_date, cut_limit, score_map, data_c
     return df_rep, pd.DataFrame(detailed_rows)
 
 # ==============================================================================
-# 5. GIAO DIỆN CHÍNH
+# 5. GIAO DIỆN CHÍNH (CẬP NHẬT PRESET MT & MN SUPER VIP)
 # ==============================================================================
 
 SCORES_PRESETS = {
     "Gốc (V24 Standard)": {
         "STD": [0, 1, 2, 3, 4, 5, 6, 7, 15, 25, 50],
-        "MOD": [0, 5, 10, 15, 30, 30, 50, 35, 25, 25, 40]
+        "MOD": [0, 5, 10, 15, 30, 30, 50, 35, 25, 25, 40],
+        "L_STD": 80, "L_MOD": 86
     },
-    "Tối ưu (Big Data 2026)": {
-        "STD": [0, 1, 2, 3, 4, 8, 10, 15, 25, 40, 60],
-        "MOD": [0, 5, 10, 15, 30, 30, 50, 35, 25, 25, 40]
+    "MT Super VIP (Target < 55s)": {
+        "STD": [95, 80, 40, 50, 15, 85, 5, 55, 25, 80, 75], 
+        "MOD": [25, 100, 20, 5, 60, 95, 35, 75, 85, 60, 100],
+        "L_STD": 75, "L_MOD": 68
     },
-    "Lai tạo (Hybrid - Thực chiến)": {
-        "STD": [0, 2, 4, 6, 12, 16, 20, 25, 30, 32, 35],
-        "MOD": [0, 5, 10, 15, 30, 30, 50, 35, 25, 25, 40]
+    "MN Super VIP (Target < 55s)": {
+        # Cấu hình dự kiến cho MN (Biên độ rộng hơn MT)
+        "STD": [10, 20, 30, 40, 50, 60, 70, 80, 80, 80, 100], 
+        "MOD": [30, 30, 30, 40, 50, 65, 70, 80, 90, 95, 100],
+        "L_STD": 72, "L_MOD": 65 
     }
 }
 
 def main():
     uploaded_files = st.file_uploader("📂 Tải file CSV/Excel", type=['xlsx', 'csv'], accept_multiple_files=True)
 
+    # Khởi tạo Session State
     if 'std_0' not in st.session_state:
-        def_vals = SCORES_PRESETS["Gốc (V24 Standard)"]
+        # Mặc định chọn bộ MT Super VIP
+        def_vals = SCORES_PRESETS["MT Super VIP (Target < 55s)"] 
         for i in range(11):
             st.session_state[f'std_{i}'] = def_vals["STD"][i]
             st.session_state[f'mod_{i}'] = def_vals["MOD"][i]
+        st.session_state['l_top_12'] = def_vals.get("L_STD", 75)
+        st.session_state['l_mod_1'] = def_vals.get("L_MOD", 68)
 
     with st.sidebar:
         st.header("⚙️ Cài đặt")
-        ROLLING_WINDOW = st.number_input("Chu kỳ xét (Ngày)", min_value=1, value=10)
+        # Chu kỳ tối ưu tìm được là 12 ngày
+        ROLLING_WINDOW = st.number_input("Chu kỳ xét (Ngày)", min_value=1, value=12)
         
         with st.expander("🎚️ 1. Điểm M0-M10 (Cấu hình)", expanded=False):
             def update_scores():
@@ -661,11 +666,14 @@ def main():
                     for i in range(11):
                         st.session_state[f'std_{i}'] = vals["STD"][i]
                         st.session_state[f'mod_{i}'] = vals["MOD"][i]
+                    # Tự động cập nhật Limit cắt top khi chọn Preset
+                    st.session_state['l_top_12'] = vals.get("L_STD", 80)
+                    st.session_state['l_mod_1'] = vals.get("L_MOD", 86)
 
             st.selectbox(
                 "📚 Chọn bộ tham số mẫu:",
                 options=["Tùy chỉnh"] + list(SCORES_PRESETS.keys()),
-                index=3, 
+                index=2, 
                 key="preset_choice",
                 on_change=update_scores
             )
@@ -687,11 +695,11 @@ def main():
         MIN_VOTES = st.number_input("Vote tối thiểu:", min_value=1, max_value=10, value=1)
         USE_INVERSE = st.checkbox("Chấm Điểm Đảo (Ngược)", value=False)
         
-        with st.expander("✂️ Chi tiết cắt Top (V25)", expanded=False):
-            L_TOP_12 = st.number_input("Top 1 & 2 lấy:", value=80)
-            L_TOP_34 = st.number_input("Top 3 & 4 lấy:", value=65)
-            L_TOP_56 = st.number_input("Top 5 & 6 lấy:", value=60)
-            LIMIT_MODIFIED = st.number_input("Top 1 Modified lấy:", value=86)
+        with st.expander("✂️ Chi tiết cắt Top (V25)", expanded=True):
+            L_TOP_12 = st.number_input("Top 1 & 2 lấy:", key='l_top_12') 
+            L_TOP_34 = st.number_input("Top 3 & 4 lấy:", value=65) 
+            L_TOP_56 = st.number_input("Top 5 & 6 lấy:", value=55) 
+            LIMIT_MODIFIED = st.number_input("Top 1 Modified lấy:", key='l_mod_1')
 
         st.markdown("---")
         with st.expander("🔥 Cấu hình Số lượng", expanded=True):
