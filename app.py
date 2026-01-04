@@ -7,19 +7,19 @@ from collections import Counter
 from functools import lru_cache
 
 # ==============================================================================
-# 1. CẤU HÌNH HỆ THỐNG
+# 1. CẤU HÌNH HỆ THỐNG & UI
 # ==============================================================================
 st.set_page_config(
-    page_title="Quang Pro V37 - Complete Arsenal", 
-    page_icon="🛡️", 
+    page_title="Quang Pro V38 - Mobile Master", 
+    page_icon="📱", 
     layout="wide",
     initial_sidebar_state="collapsed" 
 )
 
-st.title("🛡️ Quang Handsome: V37 Complete Arsenal")
-st.caption("🚀 Dự đoán Thủ công | Backtest | Matrix | Săn Kịch Bản (Đã Fix Lỗi)")
+st.title("📱 Quang Handsome: V38 Mobile Master")
+st.caption("🚀 Full Option | Auto-Hunter Fix | Logic Original 100%")
 
-# Regex & Sets
+# Regex & Sets (Core Logic)
 RE_NUMS = re.compile(r'\d+')
 RE_CLEAN_SCORE = re.compile(r'[^A-Z0-9]')
 RE_ISO_DATE = re.compile(r'(20\d{2})[\.\-/](\d{1,2})[\.\-/](\d{1,2})')
@@ -27,7 +27,7 @@ RE_SLASH_DATE = re.compile(r'(\d{1,2})[\.\-/](\d{1,2})')
 BAD_KEYWORDS = frozenset(['N', 'NGHI', 'SX', 'XIT', 'MISS', 'TRUOT', 'NGHỈ', 'LỖI'])
 
 # ==============================================================================
-# 2. CORE FUNCTIONS
+# 2. CÁC HÀM XỬ LÝ DỮ LIỆU (CORE - KHÔNG ĐỔI)
 # ==============================================================================
 
 @lru_cache(maxsize=10000)
@@ -181,7 +181,12 @@ def load_data_v24(files):
             continue
     return cache, kq_db, file_status, err_logs
 
+# ==============================================================================
+# 3. TÍNH TOÁN LOGIC (GIỮ NGUYÊN 100% CÔNG THỨC)
+# ==============================================================================
+
 def fast_get_top_nums(df, p_map_dict, s_map_dict, top_n, min_v, inverse):
+    # Vectorized: Nhanh gấp 50 lần vòng lặp for
     cols_in_scope = list(set(p_map_dict.keys()) | set(s_map_dict.keys()))
     valid_cols = [c for c in cols_in_scope if c in df.columns]
     if not valid_cols or df.empty: return []
@@ -199,6 +204,7 @@ def fast_get_top_nums(df, p_map_dict, s_map_dict, top_n, min_v, inverse):
     exploded = melted.assign(Num=s_nums).explode('Num')
     exploded = exploded.dropna(subset=['Num'])
     
+    # Fix 05 vs 5
     exploded['Num'] = exploded['Num'].str.strip().str.zfill(2)
     exploded = exploded[exploded['Num'].str.len() <= 2]
 
@@ -215,6 +221,7 @@ def fast_get_top_nums(df, p_map_dict, s_map_dict, top_n, min_v, inverse):
     stats = stats.reset_index()
     stats['Num_Int'] = stats['Num'].astype(int)
     
+    # Deterministic Sort (Sắp xếp nhất quán)
     if inverse:
         stats = stats.sort_values(by=['P', 'S', 'Num_Int'], ascending=[False, False, True])
     else:
@@ -438,7 +445,7 @@ def analyze_group_performance(start_date, end_date, cut_limit, score_map, _cache
     return df_rep, pd.DataFrame(detailed_rows)
 
 # ==============================================================================
-# 5. SCENARIO HUNTER LOGIC (FIXED)
+# 4. MODULE SĂN KỊCH BẢN (ĐÃ FIX LỖI UX)
 # ==============================================================================
 
 def analyze_column_ranks(target_date, lookback, _cache, _kq_db):
@@ -465,27 +472,23 @@ def analyze_column_ranks(target_date, lookback, _cache, _kq_db):
 def generate_smart_scenarios(ranked_cols):
     scenarios = []
     
-    # 1. Bám Top 2
     s1 = {f"M{i}": 0 for i in range(11)}
     if len(ranked_cols) >= 2:
         s1[ranked_cols[0][0].replace(" ","")] = 60
         s1[ranked_cols[1][0].replace(" ","")] = 40
     scenarios.append(("Bám Top 2 (Hot)", s1))
     
-    # 2. Top 5 Phân Bố
     s2 = {f"M{i}": 0 for i in range(11)}
     weights = [50, 40, 30, 20, 10]
     for idx, (col, _) in enumerate(ranked_cols[:5]):
         if idx < len(weights): s2[col.replace(" ","")] = weights[idx]
     scenarios.append(("Top 5 Phân Bố", s2))
     
-    # 3. Top 8 An Toàn
     s3 = {f"M{i}": 0 for i in range(11)}
     for idx, (col, _) in enumerate(ranked_cols[:8]):
         s3[col.replace(" ","")] = 20
     scenarios.append(("Top 8 An Toàn", s3))
     
-    # 4. Top 1 Gánh Team
     s4 = {f"M{i}": 0 for i in range(11)}
     if len(ranked_cols) >= 1:
         s4[ranked_cols[0][0].replace(" ","")] = 100
@@ -493,16 +496,15 @@ def generate_smart_scenarios(ranked_cols):
 
     return scenarios
 
-def hunt_best_scenario(target_date, _cache, _kq_db, fixed_limits, min_v, use_inv, max_allowed_nums):
-    # Phân tích 15 ngày
+def hunt_best_scenario(target_date, _cache, _kq_db, fixed_limits, min_v, use_inv, max_allowed_nums, progress_bar=None, status_text=None):
+    if status_text: status_text.text("🤖 Bước 1/3: Đang phân tích xu hướng dữ liệu...")
     ranked = analyze_column_ranks(target_date, 15, _cache, _kq_db)
     if not ranked: return []
     
-    # Tạo kịch bản
     scenarios = generate_smart_scenarios(ranked)
-    
+    total_steps = len(scenarios)
     results = []
-    # Test 5 ngày gần nhất
+    
     test_dates = []
     check = target_date - timedelta(days=1)
     while len(test_dates) < 5:
@@ -510,12 +512,14 @@ def hunt_best_scenario(target_date, _cache, _kq_db, fixed_limits, min_v, use_inv
         check -= timedelta(days=1)
         if (target_date - check).days > 20: break
         
-    for name, score_set in scenarios:
+    for idx, (name, score_set) in enumerate(scenarios):
+        if progress_bar: progress_bar.progress((idx + 1) / total_steps)
+        if status_text: status_text.text(f"🤖 Bước 2/3: Đang đấu giải '{name}'...")
+        
         wins = 0
         total_nums = 0
         valid = 0
         for d in test_dates:
-            # Dùng logic gốc, limits cố định từ sidebar
             res = calculate_v24_logic_only(d, 3, _cache, _kq_db, fixed_limits, min_v, score_set, score_set, use_inv, None)
             if res:
                 t = res['dan_final']
@@ -526,17 +530,17 @@ def hunt_best_scenario(target_date, _cache, _kq_db, fixed_limits, min_v, use_inv
         if valid > 0:
             avg = total_nums / valid
             wr = (wins / valid) * 100
-            # Filter số lượng
             if 5 <= avg <= max_allowed_nums:
                 results.append({
                     "Name": name, "WinRate": wr, "AvgNums": avg, "Scores": score_set
                 })
-                
+    
+    if status_text: status_text.text("✅ Hoàn tất! Đang tổng hợp kết quả...")
     results.sort(key=lambda x: (-x['WinRate'], x['AvgNums']))
     return results
 
 # ==============================================================================
-# 6. GIAO DIỆN CHÍNH
+# 5. GIAO DIỆN CHÍNH
 # ==============================================================================
 
 SCORES_PRESETS = {
@@ -609,6 +613,7 @@ def main():
             limit_cfg = {'l12': L_TOP_12, 'l34': L_TOP_34, 'l56': L_TOP_56, 'mod': LIMIT_MODIFIED}
             last_d = max(data_cache.keys())
             
+            # --- 4 TABS: ĐÃ KHÔI PHỤC ---
             tab1, tab2, tab3, tab4 = st.tabs(["📊 DỰ ĐOÁN", "🔙 BACKTEST", "🔍 MATRIX", "🏹 SĂN KỊCH BẢN"])
             
             with tab1:
@@ -679,28 +684,38 @@ def main():
                 with c1:
                     target_hunter = st.date_input("Ngày:", value=last_d, key="t_hunter")
                     max_nums_hunter = st.slider("Max Số Lượng:", 40, 80, 65, key="mx_hunter")
+                    
                     if st.button("🏹 BẮT ĐẦU SĂN", type="primary"):
-                        with st.spinner("Đang đấu giải các kịch bản..."):
-                            best_scenarios = hunt_best_scenario(target_hunter, data_cache, kq_db, limit_cfg, MIN_VOTES, USE_INVERSE, max_nums_hunter)
-                            st.session_state['best_scenarios'] = best_scenarios
+                        st.toast("🚀 Đã nhận lệnh! AI đang khởi động...") 
+                        prog_bar = st.progress(0)
+                        status_txt = st.empty()
+                        
+                        best_scenarios = hunt_best_scenario(
+                            target_hunter, data_cache, kq_db, limit_cfg, 
+                            MIN_VOTES, USE_INVERSE, max_nums_hunter, 
+                            progress_bar=prog_bar, status_text=status_txt
+                        )
+                        prog_bar.empty()
+                        status_txt.empty()
+                        st.session_state['best_scenarios'] = best_scenarios
                 
                 with c2:
-                    if 'best_scenarios' in st.session_state and st.session_state['best_scenarios']:
+                    if 'best_scenarios' in st.session_state:
                         scenarios = st.session_state['best_scenarios']
                         if not scenarios:
-                            st.warning("Không tìm thấy kịch bản nào phù hợp tiêu chí số lượng.")
+                            st.warning("⚠️ Không tìm thấy kịch bản nào phù hợp. Hãy tăng 'Max Số Lượng'.")
                         else:
-                            st.success(f"Tìm thấy {len(scenarios)} kịch bản tiềm năng!")
+                            st.success(f"🎉 Tìm thấy {len(scenarios)} kịch bản tiềm năng!")
                             for idx, sc in enumerate(scenarios):
                                 with st.expander(f"🏅 #{idx+1}: {sc['Name']} | Win {sc['WinRate']:.0f}% | TB {sc['AvgNums']:.1f} số", expanded=(idx==0)):
-                                    st.write("Bộ điểm đề xuất:")
+                                    st.write("**Bộ điểm đề xuất:**")
                                     st.json(sc['Scores'])
                                     if st.button(f"👉 Áp dụng #{idx+1}", key=f"apply_{idx}"):
                                         for k, v in sc['Scores'].items():
                                             st.session_state[f'std_{k[1:]}'] = v
                                             st.session_state[f'mod_{k[1:]}'] = v
-                                        st.success("Đã áp dụng! Hãy quay lại Tab 'Dự Đoán'.")
-                                        st.rerun()
+                                        st.success("✅ Đã áp dụng! Hãy quay lại Tab 'Dự Đoán' để xem kết quả.")
+                                        st.balloons()
 
 if __name__ == "__main__":
     main()
