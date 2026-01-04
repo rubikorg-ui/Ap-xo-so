@@ -17,7 +17,7 @@ st.set_page_config(
 )
 
 st.title("🎯 Quang Handsome: V29 Ultimate Custom")
-st.caption("🚀 Final 6 = Gốc + Smart 58 | MT & MN Super VIP Presets | Auto-Config")
+st.caption("🚀 Final 7 = Gốc + Smart 58 | Fix Config Reset | Removed MN")
 
 # Regex & Sets
 RE_NUMS = re.compile(r'\d+')
@@ -27,7 +27,7 @@ RE_SLASH_DATE = re.compile(r'(\d{1,2})[\.\-/](\d{1,2})')
 BAD_KEYWORDS = frozenset(['N', 'NGHI', 'SX', 'XIT', 'MISS', 'TRUOT', 'NGHỈ', 'LỖI'])
 
 # ==============================================================================
-# 2. CÁC HÀM XỬ LÝ DỮ LIỆU (CORE - ĐÃ TỐI ƯU & FIX LỖI)
+# 2. CÁC HÀM XỬ LÝ DỮ LIỆU (CORE)
 # ==============================================================================
 
 @lru_cache(maxsize=10000)
@@ -42,7 +42,6 @@ def get_nums(s):
 
 @lru_cache(maxsize=1000)
 def get_col_score(col_name, mapping_tuple):
-    # Fix lỗi M 1 0 (có khoảng trắng)
     clean = RE_CLEAN_SCORE.sub('', str(col_name).upper().replace(' ', ''))
     mapping = dict(mapping_tuple)
     if 'M10' in clean: return mapping.get('M10', 0)
@@ -66,7 +65,6 @@ def parse_date_smart(col_str, f_m, f_y):
         d, m = int(match_slash.group(1)), int(match_slash.group(2))
         if m < 1 or m > 12 or d < 1 or d > 31: return None
         curr_y = f_y
-        # Xử lý vắt năm (tháng 12 -> tháng 1)
         if m == 12 and f_m == 1: curr_y -= 1
         elif m == 1 and f_m == 12: curr_y += 1
         try: return datetime.date(curr_y, m, d)
@@ -82,40 +80,26 @@ def find_header_row(df_preview):
     return 3
 
 def extract_meta_from_filename(filename):
-    """
-    Trí tuệ nhân tạo: Tự động ghép Năm/Tháng từ tên file mẹ 
-    với Ngày từ tên file con để ra thời gian chính xác 100%.
-    """
     clean_name = filename.upper().replace(".CSV", "").replace(".XLSX", "")
-    
-    # 1. Tìm Năm (2025, 2026...)
     y_match = re.search(r'202[0-9]', clean_name)
     y_global = int(y_match.group(0)) if y_match else datetime.datetime.now().year
-    
-    # 2. Tìm Tháng (THANG 12, T1...)
     m_match = re.search(r'(?:THANG|THÁNG|T)[^0-9]*(\d{1,2})', clean_name)
     m_global = int(m_match.group(1)) if m_match else 12
-    
-    # 3. Tìm Ngày từ đuôi file
-    # Case A: 1.12 (Ngày đầy đủ)
     full_date_match = re.search(r'[\s\-](\d{1,2})[\.\-](\d{1,2})(?:[\.\-]20\d{2})?$', clean_name)
     if full_date_match:
         try:
             d = int(full_date_match.group(1))
             m = int(full_date_match.group(2))
             y = int(full_date_match.group(3)) if full_date_match.lastindex >= 3 else y_global
-            if m == 12 and m_global == 1: y -= 1 # Fix lùi năm
+            if m == 12 and m_global == 1: y -= 1 
             return m, y, datetime.date(y, m, d)
         except: pass
-    
-    # Case B: Số đơn lẻ (20, 30, 3) -> Ghép với m_global, y_global
     single_day_match = re.search(r'-\s*(\d{1,2})$', clean_name)
     if single_day_match:
         try:
             d = int(single_day_match.group(1))
             return m_global, y_global, datetime.date(y_global, m_global, d)
         except: pass
-    
     return m_global, y_global, None
 
 @st.cache_data(ttl=600)
@@ -124,8 +108,6 @@ def load_data_v24(files):
     kq_db = {}
     err_logs = []
     file_status = []
-
-    # --- FIX CRITICAL: KHÓA THỨ TỰ ĐỌC FILE (A-Z) ---
     files = sorted(files, key=lambda x: x.name)
 
     for file in files:
@@ -149,7 +131,6 @@ def load_data_v24(files):
                         preview = pd.read_excel(xls, sheet_name=sheet, header=None, nrows=20)
                         h_row = find_header_row(preview)
                         df = pd.read_excel(xls, sheet_name=sheet, header=h_row)
-                        # Fix M 1 0
                         df.columns = [str(c).strip().upper().replace('M 1 0', 'M10') for c in df.columns]
                         dfs_to_process.append((s_date, df))
                 file_status.append(f"✅ Excel: {file.name}")
@@ -169,7 +150,6 @@ def load_data_v24(files):
                 h_row = find_header_row(preview)
                 df = df_raw.iloc[h_row+1:].copy()
                 df.columns = df_raw.iloc[h_row]
-                # Fix M 1 0
                 df.columns = [str(c).strip().upper().replace('M 1 0', 'M10') for c in df.columns]
                 dfs_to_process.append((date_from_name, df))
                 file_status.append(f"✅ CSV: {file.name}")
@@ -201,7 +181,7 @@ def load_data_v24(files):
     return cache, kq_db, file_status, err_logs
 
 # ==============================================================================
-# 3. MODULE K55 & SMART 58 (LOGIC BỔ TRỢ)
+# 3. MODULE K55 & SMART 58
 # ==============================================================================
 def k55_parse_numbers(val):
     if pd.isna(val): return []
@@ -350,14 +330,10 @@ def calculate_smart58(target_date, cache, limit):
     return final_set, None
 
 # ==============================================================================
-# 4. CORE LOGIC V25 (VECTORIZED & DETERMINISTIC)
+# 4. CORE LOGIC V25 (FIXED TYPE ERROR)
 # ==============================================================================
 
 def fast_get_top_nums(df, p_map_dict, s_map_dict, top_n, min_v, inverse):
-    """
-    Vectorized Function: Faster 50x
-    Fix: .zfill(2) for 05/5
-    """
     cols_in_scope = list(set(p_map_dict.keys()) | set(s_map_dict.keys()))
     valid_cols = [c for c in cols_in_scope if c in df.columns]
     
@@ -376,7 +352,6 @@ def fast_get_top_nums(df, p_map_dict, s_map_dict, top_n, min_v, inverse):
     exploded = melted.assign(Num=s_nums).explode('Num')
     exploded = exploded.dropna(subset=['Num'])
     
-    # --- FIX 05 vs 5 ---
     exploded['Num'] = exploded['Num'].str.strip().str.zfill(2)
     exploded = exploded[exploded['Num'].str.len() <= 2]
 
@@ -390,7 +365,6 @@ def fast_get_top_nums(df, p_map_dict, s_map_dict, top_n, min_v, inverse):
     stats = stats[stats['V'] >= min_v]
     if stats.empty: return []
 
-    # Deterministic Sort
     stats = stats.reset_index()
     stats['Num_Int'] = stats['Num'].astype(int)
     
@@ -399,7 +373,8 @@ def fast_get_top_nums(df, p_map_dict, s_map_dict, top_n, min_v, inverse):
     else:
         stats = stats.sort_values(by=['P', 'V', 'Num_Int'], ascending=[False, False, True])
 
-    return stats['Num'].head(top_n).tolist()
+    safe_top_n = int(top_n) 
+    return stats['Num'].head(safe_top_n).tolist()
 
 def calculate_v24_final(target_date, rolling_window, cache, kq_db, limits_config, min_votes, score_std, score_mod, use_inverse, manual_groups=None):
     if target_date not in cache: return None, "Chưa có dữ liệu ngày này."
@@ -434,7 +409,6 @@ def calculate_v24_final(target_date, rolling_window, cache, kq_db, limits_config
     stats_std = {g: {'wins': 0, 'ranks': []} for g in groups}
     stats_mod = {g: {'wins': 0} for g in groups}
 
-    # --- PHASE 1: Backtest ---
     if not manual_groups:
         past_dates = []
         check_d = target_date - timedelta(days=1)
@@ -489,7 +463,6 @@ def calculate_v24_final(target_date, rolling_window, cache, kq_db, limits_config
         top6_std = [x[0] for x in final_std[:6]]
         best_mod_grp = sorted(stats_mod.keys(), key=lambda g: (-stats_mod[g]['wins'], g))[0]
     
-    # --- PHASE 2: Predict ---
     hist_series = df[col_hist_used].astype(str).str.upper().replace('S', '6', regex=False)
     hist_series = hist_series.str.replace(r'[^0-9X]', '', regex=True)
     
@@ -571,7 +544,7 @@ def analyze_group_performance(start_date, end_date, cut_limit, score_map, data_c
         except: continue
         
         kq = kq_db[d]
-        d_p_map = {}; d_s_map = {} # Only need 1 map for analysis really
+        d_p_map = {}; d_s_map = {}
         for col in df.columns:
             s_p = get_col_score(col, score_map_tuple)
             if s_p > 0: d_p_map[col] = s_p
@@ -618,45 +591,50 @@ def analyze_group_performance(start_date, end_date, cut_limit, score_map, data_c
     return df_rep, pd.DataFrame(detailed_rows)
 
 # ==============================================================================
-# 5. GIAO DIỆN CHÍNH (CẬP NHẬT PRESET MT & MN SUPER VIP)
+# 5. GIAO DIỆN CHÍNH
 # ==============================================================================
 
 SCORES_PRESETS = {
     "Gốc (V24 Standard)": {
         "STD": [0, 1, 2, 3, 4, 5, 6, 7, 15, 25, 50],
         "MOD": [0, 5, 10, 15, 30, 30, 50, 35, 25, 25, 40],
-        "L_STD": 80, "L_MOD": 86
+        "L_STD": 80, "L_MOD": 86, "ROLLING": 10, # Chu kỳ mặc định 10
+        "L34": 65, "L56": 60
     },
     "MT Super VIP (Target < 55s)": {
         "STD": [95, 80, 40, 50, 15, 85, 5, 55, 25, 80, 75], 
         "MOD": [25, 100, 20, 5, 60, 95, 35, 75, 85, 60, 100],
-        "L_STD": 75, "L_MOD": 68
+        "L_STD": 75, "L_MOD": 68, "ROLLING": 12, # Chu kỳ tối ưu 12
+        "L34": 65, "L56": 55
     },
-    "MN Super VIP (Target < 55s)": {
-        # Cấu hình dự kiến cho MN (Biên độ rộng hơn MT)
-        "STD": [10, 20, 30, 40, 50, 60, 70, 80, 80, 80, 100], 
-        "MOD": [30, 30, 30, 40, 50, 65, 70, 80, 90, 95, 100],
-        "L_STD": 72, "L_MOD": 65 
+    "Lai tạo (Hybrid - Thực chiến)": {
+        "STD": [0, 2, 4, 6, 12, 16, 20, 25, 30, 32, 35],
+        "MOD": [0, 5, 10, 15, 30, 30, 50, 35, 25, 25, 40],
+        "L_STD": 80, "L_MOD": 86, "ROLLING": 10,
+        "L34": 65, "L56": 60
     }
 }
 
 def main():
     uploaded_files = st.file_uploader("📂 Tải file CSV/Excel", type=['xlsx', 'csv'], accept_multiple_files=True)
 
-    # Khởi tạo Session State
+    # Init State
     if 'std_0' not in st.session_state:
-        # Mặc định chọn bộ MT Super VIP
+        # Default to MT VIP
         def_vals = SCORES_PRESETS["MT Super VIP (Target < 55s)"] 
         for i in range(11):
             st.session_state[f'std_{i}'] = def_vals["STD"][i]
             st.session_state[f'mod_{i}'] = def_vals["MOD"][i]
         st.session_state['l_top_12'] = def_vals.get("L_STD", 75)
         st.session_state['l_mod_1'] = def_vals.get("L_MOD", 68)
+        st.session_state['rolling_window'] = def_vals.get("ROLLING", 12)
+        st.session_state['l_top_34'] = def_vals.get("L34", 65)
+        st.session_state['l_top_56'] = def_vals.get("L56", 55)
 
     with st.sidebar:
         st.header("⚙️ Cài đặt")
-        # Chu kỳ tối ưu tìm được là 12 ngày
-        ROLLING_WINDOW = st.number_input("Chu kỳ xét (Ngày)", min_value=1, value=12)
+        # Sử dụng key để auto-update
+        ROLLING_WINDOW = st.number_input("Chu kỳ xét (Ngày)", min_value=1, key='rolling_window', step=1)
         
         with st.expander("🎚️ 1. Điểm M0-M10 (Cấu hình)", expanded=False):
             def update_scores():
@@ -666,9 +644,12 @@ def main():
                     for i in range(11):
                         st.session_state[f'std_{i}'] = vals["STD"][i]
                         st.session_state[f'mod_{i}'] = vals["MOD"][i]
-                    # Tự động cập nhật Limit cắt top khi chọn Preset
+                    # Reset toàn bộ limits và rolling window
                     st.session_state['l_top_12'] = vals.get("L_STD", 80)
                     st.session_state['l_mod_1'] = vals.get("L_MOD", 86)
+                    st.session_state['rolling_window'] = vals.get("ROLLING", 10)
+                    st.session_state['l_top_34'] = vals.get("L34", 65)
+                    st.session_state['l_top_56'] = vals.get("L56", 60)
 
             st.selectbox(
                 "📚 Chọn bộ tham số mẫu:",
@@ -684,27 +665,27 @@ def main():
             with c_s1:
                 st.write("**GỐC (Std)**")
                 for i in range(11): 
-                    custom_std[f'M{i}'] = st.number_input(f"M{i}", key=f"std_{i}")
+                    custom_std[f'M{i}'] = st.number_input(f"M{i}", key=f"std_{i}", step=1)
             with c_s2:
                 st.write("**MOD**")
                 for i in range(11): 
-                    custom_mod[f'M{i}'] = st.number_input(f"M{i}", key=f"mod_{i}")
+                    custom_mod[f'M{i}'] = st.number_input(f"M{i}", key=f"mod_{i}", step=1)
 
         st.markdown("---")
         st.header("⚖️ Lọc & Cắt")
-        MIN_VOTES = st.number_input("Vote tối thiểu:", min_value=1, max_value=10, value=1)
+        MIN_VOTES = st.number_input("Vote tối thiểu:", min_value=1, max_value=10, value=1, step=1)
         USE_INVERSE = st.checkbox("Chấm Điểm Đảo (Ngược)", value=False)
         
         with st.expander("✂️ Chi tiết cắt Top (V25)", expanded=True):
-            L_TOP_12 = st.number_input("Top 1 & 2 lấy:", key='l_top_12') 
-            L_TOP_34 = st.number_input("Top 3 & 4 lấy:", value=65) 
-            L_TOP_56 = st.number_input("Top 5 & 6 lấy:", value=55) 
-            LIMIT_MODIFIED = st.number_input("Top 1 Modified lấy:", key='l_mod_1')
+            L_TOP_12 = st.number_input("Top 1 & 2 lấy:", key='l_top_12', step=1) 
+            L_TOP_34 = st.number_input("Top 3 & 4 lấy:", key='l_top_34', step=1) 
+            L_TOP_56 = st.number_input("Top 5 & 6 lấy:", key='l_top_56', step=1) 
+            LIMIT_MODIFIED = st.number_input("Top 1 Modified lấy:", key='l_mod_1', step=1)
 
         st.markdown("---")
         with st.expander("🔥 Cấu hình Số lượng", expanded=True):
-            K55_LIMIT = st.number_input("K55 lấy bao nhiêu số?", min_value=10, max_value=90, value=56)
-            SMART58_LIMIT = st.number_input("Smart 58 lấy bao nhiêu số?", min_value=10, max_value=90, value=58)
+            K55_LIMIT = st.number_input("K55 lấy bao nhiêu số?", min_value=10, max_value=90, value=56, step=1)
+            SMART58_LIMIT = st.number_input("Smart 58 lấy bao nhiêu số?", min_value=10, max_value=90, value=58, step=1)
         
         st.markdown("---")
         with st.expander("👁️ Tùy chọn hiển thị", expanded=True):
@@ -873,7 +854,7 @@ def main():
                     c_a1, c_a2 = st.columns(2)
                     with c_a1: d_range_a = st.date_input("Thời gian:", [last_d - timedelta(days=15), last_d], key="dr_a")
                     with c_a2: 
-                        cut_val = st.number_input("Cắt Top:", value=60, step=5)
+                        cut_val = st.number_input("Cắt Top:", value=60, step=1)
                         score_mode = st.radio("Hệ điểm:", ["Gốc (Std)", "Modified"], horizontal=True)
                     btn_scan = st.button("🔎 QUÉT MATRIX", use_container_width=True)
                 
