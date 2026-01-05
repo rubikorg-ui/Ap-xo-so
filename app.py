@@ -3,6 +3,7 @@ import pandas as pd
 import re
 import datetime
 import time
+import random
 from datetime import timedelta
 from collections import Counter
 from functools import lru_cache
@@ -11,14 +12,14 @@ from functools import lru_cache
 # 1. CẤU HÌNH HỆ THỐNG
 # ==============================================================================
 st.set_page_config(
-    page_title="Quang Pro V42.1 - Stable Core", 
-    page_icon="🛡️", 
+    page_title="Quang Pro V42.2 - Genetic Ultra", 
+    page_icon="🧬", 
     layout="wide",
     initial_sidebar_state="collapsed" 
 )
 
-st.title("🛡️ Quang Handsome: V42.1 Stable Core")
-st.caption("🚀 Fix lỗi StreamlitAPIException | Tối ưu Data Loader | Cấu hình Miền Trung")
+st.title("🧬 Quang Handsome: V42.2 Genetic Ultra")
+st.caption("🚀 AI Genetic Hunter | Fix Data Loader | Miền Trung Preset | Logic Gốc 100%")
 
 # Regex & Sets
 RE_NUMS = re.compile(r'\d+')
@@ -28,7 +29,7 @@ RE_SLASH_DATE = re.compile(r'(\d{1,2})[\.\-/](\d{1,2})')
 BAD_KEYWORDS = frozenset(['N', 'NGHI', 'SX', 'XIT', 'MISS', 'TRUOT', 'NGHỈ', 'LỖI'])
 
 # ==============================================================================
-# 2. CORE FUNCTIONS
+# 2. CORE FUNCTIONS (LOGIC GỐC - GIỮ NGUYÊN)
 # ==============================================================================
 
 @lru_cache(maxsize=10000)
@@ -104,6 +105,7 @@ def extract_meta_from_filename(filename):
         except: pass
     return m_global, y_global, None
 
+# --- UPDATED DATA LOADER (TỐI ƯU CHO FILE CỦA BẠN) ---
 @st.cache_data(ttl=600, show_spinner=False)
 def load_data_v24(files):
     cache = {} 
@@ -111,16 +113,12 @@ def load_data_v24(files):
     err_logs = []
     file_status = []
     
-    # Sắp xếp file để đảm bảo thứ tự
     files = sorted(files, key=lambda x: x.name)
-
-    # DANH SÁCH FILE CẦN BỎ QUA (IGNORE LIST)
+    # Filter list: Bỏ qua BPĐ, file rác
     IGNORE_KEYWORDS = ['N.CSV', 'BPĐ', 'BPD', 'BANG PHU', '~$', 'DS.CSV']
 
     for file in files:
         f_name_upper = file.name.upper()
-        
-        # 1. BỘ LỌC FILE RÁC/KHÔNG CẦN THIẾT
         if any(kw in f_name_upper for kw in IGNORE_KEYWORDS): 
             continue
             
@@ -128,8 +126,6 @@ def load_data_v24(files):
         
         try:
             dfs_to_process = []
-            
-            # XỬ LÝ FILE EXCEL
             if file.name.endswith('.xlsx'):
                 xls = pd.ExcelFile(file, engine='openpyxl')
                 for sheet in xls.sheet_names:
@@ -147,17 +143,14 @@ def load_data_v24(files):
                         preview = pd.read_excel(xls, sheet_name=sheet, header=None, nrows=20, engine='openpyxl')
                         h_row = find_header_row(preview)
                         df = pd.read_excel(xls, sheet_name=sheet, header=h_row, engine='openpyxl')
-                        # Fix lỗi cột M 1 0 do merge cell
                         df.columns = [str(c).strip().upper().replace('M 1 0', 'M10') for c in df.columns]
                         dfs_to_process.append((s_date, df))
                 file_status.append(f"✅ Excel: {file.name}")
             
-            # XỬ LÝ FILE CSV (Dạng data của bạn)
             elif file.name.endswith('.csv'):
                 if not date_from_name: 
-                    err_logs.append(f"⚠️ Bỏ qua '{file.name}': Không tìm thấy ngày trong tên file")
+                    err_logs.append(f"⚠️ Bỏ qua '{file.name}': Không tìm thấy ngày")
                     continue
-                
                 try:
                     preview = pd.read_csv(file, header=None, nrows=20, encoding='utf-8')
                     file.seek(0)
@@ -165,7 +158,6 @@ def load_data_v24(files):
                 except:
                     file.seek(0)
                     try:
-                        # Thử encoding khác cho file tiếng Việt cũ
                         preview = pd.read_csv(file, header=None, nrows=20, encoding='latin-1')
                         file.seek(0)
                         df_raw = pd.read_csv(file, header=None, encoding='latin-1')
@@ -180,40 +172,32 @@ def load_data_v24(files):
                 dfs_to_process.append((date_from_name, df))
                 file_status.append(f"✅ CSV: {file.name}")
 
-            # XỬ LÝ DATAFRAME SAU KHI LOAD
             for t_date, df in dfs_to_process:
                 df.columns = [str(c).strip().upper() for c in df.columns]
                 hist_map = {}
-                
-                # Quét các cột ngày tháng trong file (nếu có cột lịch sử)
                 for col in df.columns:
                     if "UNNAMED" in col: continue
                     d_obj = parse_date_smart(col, f_m, f_y)
                     if d_obj: hist_map[d_obj] = col
                 
-                # Tìm KQ (Kết quả) để lưu vào DB
                 kq_row = None
                 if not df.empty:
-                    # Chỉ quét 2 cột đầu để tìm chữ KQ, tránh quét toàn bảng gây chậm
                     for c_idx in range(min(2, len(df.columns))):
                         col_check = df.columns[c_idx]
                         mask_kq = df[col_check].astype(str).str.upper().str.contains(r'KQ|KẾT QUẢ')
                         if mask_kq.any():
                             kq_row = df[mask_kq].iloc[0]
                             break
-                
                 if kq_row is not None:
                     for d_val, c_name in hist_map.items():
                         val = str(kq_row[c_name])
                         nums = get_nums(val)
                         if nums: kq_db[d_val] = nums[0]
-                
                 cache[t_date] = {'df': df, 'hist_map': hist_map}
         
         except Exception as e:
-            err_logs.append(f"❌ Lỗi nghiêm trọng '{file.name}': {str(e)}")
+            err_logs.append(f"❌ Lỗi '{file.name}': {str(e)}")
             continue
-            
     return cache, kq_db, file_status, err_logs
 
 def fast_get_top_nums(df, p_map_dict, s_map_dict, top_n, min_v, inverse):
@@ -463,103 +447,135 @@ def analyze_group_performance(start_date, end_date, cut_limit, score_map, _cache
     return df_rep, pd.DataFrame(detailed_rows)
 
 # ==============================================================================
-# 3. AUTO-HUNTER
+# 3. AUTO-HUNTER (GENETIC ALGORITHM V2 - SIÊU TỐC)
 # ==============================================================================
 
-def analyze_column_ranks(target_date, lookback, _cache, _kq_db):
-    past_dates = []
-    check_d = target_date - timedelta(days=1)
-    while len(past_dates) < lookback:
-        if check_d in _cache and check_d in _kq_db: past_dates.append(check_d)
-        check_d -= timedelta(days=1)
-        if (target_date - check_d).days > 60: break
-    col_hits = Counter()
-    if not past_dates: return []
-    for d in past_dates:
-        df = _cache[d]['df']
-        kq = _kq_db[d]
-        for col in df.columns:
-            clean_name = str(col).upper().replace(" ", "")
-            if re.match(r'^M\d+$', clean_name):
-                all_vals = " ".join(df[col].astype(str).tolist())
-                if kq in get_nums(all_vals): col_hits[clean_name] += 1
-    return col_hits.most_common()
+def evaluate_fitness(score_set, test_dates, _cache, _kq_db, fixed_limits, min_v, use_inv, max_nums):
+    wins = 0
+    total_nums = 0
+    valid_days = 0
+    
+    # Chạy test trên danh sách ngày
+    for d in test_dates:
+        # Pass score_set vào cả std và mod để test đồng bộ
+        res = calculate_v24_logic_only(d, 3, _cache, _kq_db, fixed_limits, min_v, score_set, score_set, use_inv, None)
+        if res:
+            t = res['dan_final']
+            if _kq_db[d] in t: wins += 1
+            total_nums += len(t)
+            valid_days += 1
+            
+    if valid_days == 0: return 0, 999
+    
+    avg_nums = total_nums / valid_days
+    win_rate = (wins / valid_days) * 100
+    
+    # Fitness Function: Ưu tiên Win Rate, phạt nếu số lượng quá lớn
+    fitness = win_rate * 10 - avg_nums
+    if avg_nums > max_nums: fitness -= 500 
+    
+    return fitness, win_rate, avg_nums
 
-def generate_smart_scenarios(ranked_cols):
-    scenarios = []
-    if not ranked_cols:
-        s_def = {f"M{i}": 0 for i in range(11)}; s_def["M10"] = 50; s_def["M9"] = 30
-        scenarios.append(("Mặc định (Backup)", s_def))
-        return scenarios
-    
-    s1 = {f"M{i}": 0 for i in range(11)}
-    if len(ranked_cols) >= 2:
-        s1[ranked_cols[0][0]] = 60
-        s1[ranked_cols[1][0]] = 40
-    scenarios.append(("Bám Top 2 (Hot)", s1))
-    
-    s2 = {f"M{i}": 0 for i in range(11)}
-    weights = [50, 40, 30, 20, 10]
-    for idx, (col, _) in enumerate(ranked_cols[:5]):
-        if idx < len(weights): s2[col] = weights[idx]
-    scenarios.append(("Top 5 Phân Bố", s2))
-    
-    s3 = {f"M{i}": 0 for i in range(11)}
-    for idx, (col, _) in enumerate(ranked_cols[:8]):
-        s3[col] = 20
-    scenarios.append(("Top 8 An Toàn", s3))
-    
-    s4 = {f"M{i}": 0 for i in range(11)}
-    if len(ranked_cols) >= 1: s4[ranked_cols[0][0]] = 100
-    scenarios.append(("Top 1 Gánh Team", s4))
-    return scenarios
+def generate_random_genome():
+    # Tạo ngẫu nhiên bộ điểm M0-M10
+    possible_values = [0, 5, 10, 15, 20, 25, 30, 40, 50, 60, 70, 80, 100]
+    return {f"M{i}": random.choice(possible_values) for i in range(11)}
 
-def hunt_best_scenario(target_date, _cache, _kq_db, fixed_limits, min_v, use_inv, max_allowed_nums, progress_bar=None, status_text=None):
-    if status_text: status_text.text("🤖 Bước 1/3: Đang phân tích xu hướng...")
-    ranked = analyze_column_ranks(target_date, 15, _cache, _kq_db)
-    
-    if not ranked and status_text:
-        status_text.text("⚠️ Không đọc được cột M nào. Dùng mặc định.")
-        ranked = [('M10', 10), ('M9', 8), ('M8', 6), ('M5', 5), ('M6', 4)]
+def mutate_genome(genome, mutation_rate=0.2):
+    # Đột biến: Thay đổi nhẹ giá trị của gen
+    new_genome = genome.copy()
+    possible_values = [0, 5, 10, 15, 20, 25, 30, 40, 50, 60, 70, 80, 100]
+    for k in new_genome:
+        if random.random() < mutation_rate:
+            if random.random() < 0.5:
+                new_genome[k] = random.choice(possible_values)
+            else:
+                curr_idx = possible_values.index(new_genome[k]) if new_genome[k] in possible_values else 0
+                step = random.choice([-1, 1])
+                new_idx = max(0, min(len(possible_values)-1, curr_idx + step))
+                new_genome[k] = possible_values[new_idx]
+    return new_genome
 
-    scenarios = generate_smart_scenarios(ranked)
-    total_steps = len(scenarios)
-    results = []
+def crossover_genome(parent1, parent2):
+    # Lai ghép: Trộn gen bố mẹ
+    child = {}
+    for i in range(11):
+        key = f"M{i}"
+        child[key] = parent1[key] if random.random() > 0.5 else parent2[key]
+    return child
+
+def run_genetic_search(target_date, _cache, _kq_db, fixed_limits, min_v, use_inv, max_allowed_nums, 
+                      generations=10, population_size=30, progress_bar=None, status_text=None):
+    
+    # 1. Chuẩn bị dữ liệu test (7-10 ngày gần nhất)
     test_dates = []
     check = target_date - timedelta(days=1)
-    while len(test_dates) < 5:
-        if check in _kq_db: test_dates.append(check)
+    while len(test_dates) < 8: 
+        if check in _kq_db and check in _cache: test_dates.append(check)
         check -= timedelta(days=1)
-        if (target_date - check).days > 30: break
+        if (target_date - check).days > 45: break
     
-    for idx, (name, score_set) in enumerate(scenarios):
-        if progress_bar: progress_bar.progress((idx + 1) / total_steps)
-        if status_text: status_text.text(f"🤖 Bước 2/3: Đang đấu giải '{name}'...")
-        wins = 0
-        total_nums = 0
-        valid = 0
-        for d in test_dates:
-            res = calculate_v24_logic_only(d, 3, _cache, _kq_db, fixed_limits, min_v, score_set, score_set, use_inv, None)
-            if res:
-                t = res['dan_final']
-                if _kq_db[d] in t: wins += 1
-                total_nums += len(t)
-                valid += 1
-        if valid > 0:
-            avg = total_nums / valid
-            wr = (wins / valid) * 100
-            if avg <= max_allowed_nums:
-                results.append({"Name": name, "WinRate": wr, "AvgNums": avg, "Scores": score_set})
+    if not test_dates: return []
+
+    # 2. Khởi tạo quần thể
+    population = [generate_random_genome() for _ in range(population_size)]
+    population[0] = {f"M{i}": 0 for i in range(11)}; population[0]['M10']=50
     
-    if status_text: status_text.text("✅ Hoàn tất!")
-    results.sort(key=lambda x: (-x['WinRate'], x['AvgNums']))
-    return results
+    best_solution = None
+    history_best = []
+
+    for gen in range(generations):
+        scored_pop = []
+        for genome in population:
+            fit, wr, avg = evaluate_fitness(genome, test_dates, _cache, _kq_db, fixed_limits, min_v, use_inv, max_allowed_nums)
+            scored_pop.append({'genome': genome, 'fitness': fit, 'wr': wr, 'avg': avg})
+        
+        scored_pop.sort(key=lambda x: x['fitness'], reverse=True)
+        current_best = scored_pop[0]
+
+        if best_solution is None or current_best['fitness'] > best_solution['fitness']:
+            best_solution = current_best
+        
+        history_best.append(best_solution)
+
+        if status_text: 
+            status_text.text(f"🧬 Thế hệ {gen+1}/{generations}: Best Win {current_best['wr']:.1f}% ({current_best['avg']:.1f} số)")
+        if progress_bar: 
+            progress_bar.progress((gen + 1) / generations)
+
+        # CHỌN LỌC & LAI TẠO
+        elite_count = int(population_size * 0.2)
+        new_pop = [x['genome'] for x in scored_pop[:elite_count]]
+        
+        while len(new_pop) < population_size:
+            parent1 = random.choice(scored_pop[:int(population_size*0.5)])['genome']
+            parent2 = random.choice(scored_pop[:int(population_size*0.5)])['genome']
+            child = crossover_genome(parent1, parent2)
+            child = mutate_genome(child, mutation_rate=0.3)
+            new_pop.append(child)
+        
+        population = new_pop
+
+    unique_solutions = []
+    seen = set()
+    for sol in sorted(history_best, key=lambda x: x['fitness'], reverse=True):
+        s_str = str(sol['genome'])
+        if s_str not in seen:
+            unique_solutions.append({
+                "Name": f"AI Gen-{random.randint(100,999)}",
+                "WinRate": sol['wr'],
+                "AvgNums": sol['avg'],
+                "Scores": sol['genome']
+            })
+            seen.add(s_str)
+            if len(unique_solutions) >= 5: break
+            
+    return unique_solutions
 
 # ==============================================================================
 # 4. GIAO DIỆN CHÍNH
 # ==============================================================================
 
-# Callback cập nhật điểm để tránh lỗi StreamlitAPIException
 def apply_hunter_callback(scores):
     for k, v in scores.items():
         key_suffix = k[1:] 
@@ -648,7 +664,7 @@ def main():
             limit_cfg = {'l12': L_TOP_12, 'l34': L_TOP_34, 'l56': L_TOP_56, 'mod': LIMIT_MODIFIED}
             last_d = max(data_cache.keys())
             
-            tab1, tab2, tab3, tab4 = st.tabs(["📊 DỰ ĐOÁN", "🔙 BACKTEST", "🔍 MATRIX", "🏹 SĂN KỊCH BẢN"])
+            tab1, tab2, tab3, tab4 = st.tabs(["📊 DỰ ĐOÁN", "🔙 BACKTEST", "🔍 MATRIX", "🧬 AI HUNTER"])
             
             with tab1:
                 st.subheader("Dự đoán thủ công (3 Bảng)")
@@ -734,40 +750,50 @@ def main():
                         st.dataframe(df_detail, use_container_width=True)
 
             with tab4:
-                st.subheader("🏹 Săn Kịch Bản Tối Ưu")
-                st.info("AI tự động phân tích tần suất trúng, tạo ra các chiến thuật và chọn cái tốt nhất.")
+                st.subheader("🧬 AI GENETIC HUNTER (Săn Tìm Cấu Hình)")
+                st.info("Sử dụng giải thuật di truyền để thử hàng ngàn tổ hợp điểm số, tìm ra cấu hình 'độc nhất' phù hợp với dữ liệu hiện tại.")
                 
-                c1, c2 = st.columns([1, 2])
+                c1, c2 = st.columns([1, 1.5])
                 with c1:
-                    target_hunter = st.date_input("Ngày:", value=last_d, key="t_hunter")
-                    max_nums_hunter = st.slider("Max Số Lượng:", 40, 80, 65, key="mx_hunter")
+                    target_hunter = st.date_input("Ngày dự đoán:", value=last_d, key="t_hunter")
+                    max_nums_hunter = st.slider("Max Số Lượng chấp nhận:", 40, 85, 65, key="mx_hunter")
                     
-                    if st.button("🏹 BẮT ĐẦU SĂN", type="primary"):
-                        st.toast("🚀 Đã nhận lệnh! AI đang khởi động...") 
+                    st.write("**Cấu hình AI Scan:**")
+                    pop_size = st.select_slider("Kích thước quần thể (Mẫu/Thế hệ):", options=[20, 50, 100], value=50)
+                    n_gen = st.select_slider("Số thế hệ (Vòng lặp tiến hóa):", options=[5, 10, 20, 50], value=10)
+                    
+                    total_scenarios = pop_size * n_gen
+                    st.caption(f"⚡ AI sẽ chạy thử nghiệm khoảng **{total_scenarios}** cấu hình.")
+
+                    if st.button("🧬 BẮT ĐẦU SĂN (DEEP SCAN)", type="primary"):
+                        st.toast("🚀 AI đang khởi động quy trình tiến hóa...", icon="🧬") 
                         prog_bar = st.progress(0)
                         status_txt = st.empty()
                         
-                        best_scenarios = hunt_best_scenario(
+                        best_scenarios = run_genetic_search(
                             target_hunter, data_cache, kq_db, limit_cfg, 
-                            MIN_VOTES, USE_INVERSE, max_nums_hunter, 
+                            MIN_VOTES, USE_INVERSE, max_nums_hunter,
+                            generations=n_gen, population_size=pop_size,
                             progress_bar=prog_bar, status_text=status_txt
                         )
+                        
                         prog_bar.empty()
-                        status_txt.empty()
+                        status_txt.success("✅ Hoàn tất quá trình tiến hóa!")
                         st.session_state['best_scenarios'] = best_scenarios
                 
                 with c2:
                     if 'best_scenarios' in st.session_state:
                         scenarios = st.session_state['best_scenarios']
                         if not scenarios:
-                            st.warning("⚠️ Không tìm thấy kịch bản nào phù hợp tiêu chí số lượng. Hãy tăng 'Max Số Lượng' lên 70 hoặc 75.")
+                            st.warning("⚠️ Không tìm thấy cấu hình nào thỏa mãn điều kiện Max Số Lượng.")
                         else:
-                            st.success(f"🎉 Tìm thấy {len(scenarios)} kịch bản tiềm năng!")
+                            st.success(f"🎉 Tìm thấy {len(scenarios)} cấu hình ưu tú nhất!")
                             for idx, sc in enumerate(scenarios):
-                                with st.expander(f"🏅 #{idx+1}: {sc['Name']} | Win {sc['WinRate']:.0f}% | TB {sc['AvgNums']:.1f} số", expanded=(idx==0)):
-                                    st.write("**Bộ điểm đề xuất:**")
+                                with st.expander(f"🏅 #{idx+1} ({sc['Name']}) | Win {sc['WinRate']:.1f}% | TB {sc['AvgNums']:.1f} số", expanded=(idx==0)):
+                                    st.write("Cấu hình điểm:")
                                     st.json(sc['Scores'])
-                                    st.button(f"👉 Áp dụng #{idx+1}", key=f"apply_{idx}", on_click=apply_hunter_callback, args=(sc['Scores'],))
+                                    if st.button(f"👉 Áp dụng Cấu hình #{idx+1}", key=f"apply_gen_{idx}"):
+                                        apply_hunter_callback(sc['Scores'])
 
 if __name__ == "__main__":
     main()
