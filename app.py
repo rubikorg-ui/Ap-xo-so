@@ -19,7 +19,7 @@ st.set_page_config(
 )
 
 st.title("🧬 Quang Handsome: V42.4 Mobile Pro (Matrix Engine)")
-st.caption("🚀 Tích hợp Matrix Engine siêu tốc | Logic Gốc 100% | Chạy mượt trên Mobile")
+st.caption("🚀 Tích hợp Matrix Engine siêu tốc | Logic Gốc 100% | Fix lỗi Streamlit")
 
 # Regex & Sets
 RE_NUMS = re.compile(r'\d+')
@@ -651,6 +651,7 @@ def run_genetic_search(target_date, _cache, _kq_db, fixed_limits, min_v, use_inv
 def apply_hunter_callback(scores):
     for k, v in scores.items():
         key_suffix = k[1:] 
+        # Cập nhật Session State trực tiếp
         st.session_state[f'std_{key_suffix}'] = v
         st.session_state[f'mod_{key_suffix}'] = v
     st.session_state['applied_success'] = True
@@ -681,6 +682,7 @@ SCORES_PRESETS = {
 def main():
     uploaded_files = st.file_uploader("📂 Tải file CSV/Excel", type=['xlsx', 'csv'], accept_multiple_files=True)
 
+    # Khởi tạo giá trị mặc định nếu chưa có
     if 'std_0' not in st.session_state:
         def_vals = SCORES_PRESETS["Gốc (V24 Standard)"]
         for i in range(11):
@@ -735,7 +737,7 @@ def main():
             for s in f_status: st.success(s)
             for e in err_logs: st.error(e)
         
-        # Check success flag
+        # Check success flag (Toast thông báo)
         if st.session_state.get('applied_success'):
             st.toast("✅ Đã áp dụng cấu hình thành công!", icon="🎉")
             st.session_state['applied_success'] = False
@@ -886,8 +888,14 @@ def main():
                                 with st.expander(f"🏅 Top {idx+1} | Win {sc['WinRate']:.0f}% | {sc['AvgNums']:.1f} số", expanded=(idx==0)):
                                     st.write("**Điểm số:**")
                                     st.json(sc['Scores'])
-                                    if st.button(f"👉 Áp dụng Ngay", key=f"apply_gen_{idx}"):
-                                        apply_hunter_callback(sc['Scores'])
+                                    
+                                    # SỬA LỖI Ở ĐÂY: Dùng on_click thay vì if st.button
+                                    st.button(
+                                        f"👉 Áp dụng Ngay", 
+                                        key=f"apply_gen_{idx}",
+                                        on_click=apply_hunter_callback,
+                                        args=(sc['Scores'],)
+                                    )
 
 if __name__ == "__main__":
     main()
