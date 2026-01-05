@@ -12,14 +12,14 @@ from functools import lru_cache
 # 1. CẤU HÌNH HỆ THỐNG
 # ==============================================================================
 st.set_page_config(
-    page_title="Quang Pro V42.4 - Mobile Matrix", 
+    page_title="Quang Pro V42.5 - Mobile Hunter", 
     page_icon="🧬", 
     layout="wide",
     initial_sidebar_state="collapsed" 
 )
 
-st.title("🧬 Quang Handsome: V42.4 Mobile Pro (Matrix Engine)")
-st.caption("🚀 Tích hợp Matrix Engine siêu tốc | Logic Gốc 100% | Fix lỗi Streamlit")
+st.title("🧬 Quang Handsome: V42.5 Hunter Pro")
+st.caption("🚀 Matrix Engine | Tùy chỉnh Backtest | Soi nhịp cầu gãy/thông")
 
 # Regex & Sets
 RE_NUMS = re.compile(r'\d+')
@@ -451,7 +451,7 @@ def analyze_group_performance(start_date, end_date, cut_limit, score_map, _cache
 def prepare_hunter_data(test_dates, _cache, _kq_db, rolling_window):
     """
     Chuẩn bị dữ liệu thô (đếm số sẵn) cho tất cả các ngày test.
-    Trả về list các (kq, dataframe_tan_suat_cua_ngay_do)
+    Trả về list các (kq, dataframe_tan_suat_cua_ngay_do, date_obj)
     """
     prepared_days = []
     
@@ -468,15 +468,12 @@ def prepare_hunter_data(test_dates, _cache, _kq_db, rolling_window):
             if (d - check_d).days > 45: break
             
         # Tổng hợp tần suất cho ngày test d
-        # day_matrix: Index=00-99, Cols=M0..M10, Val=Count
         day_matrix = pd.DataFrame(0, index=[f"{x:02d}" for x in range(100)], columns=[f"M{i}" for i in range(11)])
         
         has_data = False
         for pd_date in past_dates:
             df = _cache[pd_date]['df']
-            # Quét cột và cộng dồn vào day_matrix
             for col in df.columns:
-                # Map col -> M key (Logic đơn giản hóa dựa trên tên cột và logic gốc)
                 clean_col = str(col).upper().replace(' ', '').replace('M10', 'MX')
                 m_idx = -1
                 if 'MX' in clean_col: m_idx = 10
@@ -486,7 +483,6 @@ def prepare_hunter_data(test_dates, _cache, _kq_db, rolling_window):
                 
                 if m_idx == -1: continue
                 
-                # Tránh regex lặp lại
                 vals = df[col].astype(str).str.upper()
                 mask_bad = vals.str.contains(r'N|NGHI|SX|XIT|MISS|TRUOT|NGHỈ|LỖI', regex=True)
                 
@@ -501,6 +497,7 @@ def prepare_hunter_data(test_dates, _cache, _kq_db, rolling_window):
                     
         if has_data:
             prepared_days.append({
+                'date': d,
                 'kq': kq,
                 'matrix': day_matrix
             })
@@ -509,46 +506,45 @@ def prepare_hunter_data(test_dates, _cache, _kq_db, rolling_window):
 
 def evaluate_fitness_optimized(genome, prepared_days, max_nums):
     """
-    Tính fitness dựa trên dữ liệu đã chuẩn bị (Matrix Multiplication).
-    Logic 100% giống cũ: Tính điểm -> Sort -> Cắt Top -> Check Win -> Sum lại.
+    Tính fitness và trả về cả lịch sử Win/Loss
     """
     wins = 0
     total_nums = 0
     valid_days = 0
+    history = [] # Lưu trạng thái W/L từng ngày
     
-    # Chuyển genome thành vector để nhân
     score_vec = pd.Series([genome.get(f"M{i}", 0) for i in range(11)], index=[f"M{i}" for i in range(11)])
     
     for day_obj in prepared_days:
         kq = day_obj['kq']
-        matrix = day_obj['matrix'] # 100 rows x 11 cols
+        matrix = day_obj['matrix']
         
-        # 1. Tính điểm: Matrix x Vector = Series điểm (Index 00-99)
         scores = matrix.dot(score_vec)
-        
-        # 2. Lọc số có điểm > 0
         scores = scores[scores > 0]
-        if scores.empty: continue
+        if scores.empty: 
+            history.append("L")
+            continue
         
-        # 3. Sort logic: Điểm cao -> Số bé (Giống logic gốc)
         df_res = scores.to_frame(name='S')
         df_res['N_Int'] = df_res.index.astype(int)
         df_res = df_res.sort_values(by=['S', 'N_Int'], ascending=[False, True])
         
-        # 4. Lấy dàn số
         top_nums = df_res.index[:max_nums].tolist()
         
-        if kq in top_nums: wins += 1
+        is_win = kq in top_nums
+        history.append("W" if is_win else "L")
+        
+        if is_win: wins += 1
         total_nums += len(top_nums)
         valid_days += 1
         
-    if valid_days == 0: return 0, 0, 999
+    if valid_days == 0: return 0, 0, 999, history
     
     avg_nums = total_nums / valid_days
     win_rate = (wins / valid_days) * 100
     fitness = win_rate * 10 - avg_nums
     
-    return fitness, win_rate, avg_nums
+    return fitness, win_rate, avg_nums, history
 
 def generate_random_genome():
     possible_values = [0, 5, 10, 15, 20, 25, 30, 40, 50, 60, 70, 80, 100]
@@ -576,19 +572,21 @@ def crossover_genome(parent1, parent2):
     return child
 
 def run_genetic_search(target_date, _cache, _kq_db, fixed_limits, min_v, use_inv, max_allowed_nums, 
-                      generations=10, population_size=30, progress_bar=None, status_text=None):
+                      test_days_limit, generations=10, population_size=30, progress_bar=None, status_text=None):
     
-    # 1. Xác định ngày test
+    # 1. Xác định ngày test (Theo số lượng user nhập)
     test_dates = []
     check = target_date - timedelta(days=1)
-    while len(test_dates) < 5: 
+    
+    # Lấy đủ số ngày user yêu cầu
+    while len(test_dates) < test_days_limit: 
         if check in _kq_db and check in _cache: test_dates.append(check)
         check -= timedelta(days=1)
-        if (target_date - check).days > 45: break
+        if (target_date - check).days > (test_days_limit * 2 + 30): break # Giới hạn scan
     
     if not test_dates: return []
 
-    # 2. CHUẨN BỊ DỮ LIỆU 1 LẦN (Pre-compute)
+    # 2. CHUẨN BỊ DỮ LIỆU
     if status_text: status_text.text("⚙️ Đang mã hóa dữ liệu (Matrix)...")
     prepared_data = prepare_hunter_data(test_dates, _cache, _kq_db, rolling_window=10)
     
@@ -602,9 +600,9 @@ def run_genetic_search(target_date, _cache, _kq_db, fixed_limits, min_v, use_inv
     for gen in range(generations):
         scored_pop = []
         for genome in population:
-            # GỌI HÀM ĐÁNH GIÁ TỐI ƯU
-            fit, wr, avg = evaluate_fitness_optimized(genome, prepared_data, max_allowed_nums)
-            scored_pop.append({'genome': genome, 'fitness': fit, 'wr': wr, 'avg': avg})
+            # GỌI HÀM ĐÁNH GIÁ (Nhận thêm History)
+            fit, wr, avg, hist = evaluate_fitness_optimized(genome, prepared_data, max_allowed_nums)
+            scored_pop.append({'genome': genome, 'fitness': fit, 'wr': wr, 'avg': avg, 'hist': hist})
         
         scored_pop.sort(key=lambda x: x['fitness'], reverse=True)
         current_best = scored_pop[0]
@@ -630,14 +628,34 @@ def run_genetic_search(target_date, _cache, _kq_db, fixed_limits, min_v, use_inv
 
     unique_solutions = []
     seen = set()
+    
+    # Format lại ngày để hiển thị
+    date_labels = [d.strftime("%d/%m") for d in test_dates] 
+    
     for sol in sorted(history_best, key=lambda x: x['fitness'], reverse=True):
         s_str = str(sol['genome'])
         if s_str not in seen:
+            # Ghép lịch sử W/L với ngày
+            # prepared_data thứ tự là ngày mới -> cũ (do loop test_dates)
+            # hist cũng thứ tự tương ứng
+            # Ta đảo ngược để hiển thị: Cũ -> Mới cho dễ nhìn nhịp
+            
+            raw_hist = sol['hist'] # Ví dụ ['W', 'L', 'W'] (Mới -> Cũ)
+            
+            # Map icon
+            icon_hist = ["✅" if h == 'W' else "❌" for h in raw_hist]
+            
+            # Đảo ngược để hiện từ quá khứ -> hiện tại
+            display_hist_str = " | ".join(reversed(icon_hist))
+            display_date_str = " | ".join(reversed(date_labels))
+            
             unique_solutions.append({
                 "Name": f"AI Hunter-{random.randint(100,999)}",
                 "WinRate": sol['wr'],
                 "AvgNums": sol['avg'],
-                "Scores": sol['genome']
+                "Scores": sol['genome'],
+                "HistoryIcons": display_hist_str,
+                "HistoryDates": display_date_str
             })
             seen.add(s_str)
             if len(unique_solutions) >= 5: break
@@ -651,7 +669,6 @@ def run_genetic_search(target_date, _cache, _kq_db, fixed_limits, min_v, use_inv
 def apply_hunter_callback(scores):
     for k, v in scores.items():
         key_suffix = k[1:] 
-        # Cập nhật Session State trực tiếp
         st.session_state[f'std_{key_suffix}'] = v
         st.session_state[f'mod_{key_suffix}'] = v
     st.session_state['applied_success'] = True
@@ -682,7 +699,6 @@ SCORES_PRESETS = {
 def main():
     uploaded_files = st.file_uploader("📂 Tải file CSV/Excel", type=['xlsx', 'csv'], accept_multiple_files=True)
 
-    # Khởi tạo giá trị mặc định nếu chưa có
     if 'std_0' not in st.session_state:
         def_vals = SCORES_PRESETS["Gốc (V24 Standard)"]
         for i in range(11):
@@ -737,7 +753,6 @@ def main():
             for s in f_status: st.success(s)
             for e in err_logs: st.error(e)
         
-        # Check success flag (Toast thông báo)
         if st.session_state.get('applied_success'):
             st.toast("✅ Đã áp dụng cấu hình thành công!", icon="🎉")
             st.session_state['applied_success'] = False
@@ -755,7 +770,6 @@ def main():
                 
                 if st.button("🚀 CHẠY PHÂN TÍCH", type="primary", use_container_width=True):
                     with st.spinner("Đang tính toán..."):
-                        # Lấy values từ session state
                         custom_std = {f'M{i}': st.session_state[f'std_{i}'] for i in range(11)}
                         custom_mod = {f'M{i}': st.session_state[f'mod_{i}'] for i in range(11)}
                         res, err = calculate_v24_final(target, ROLLING_WINDOW, data_cache, kq_db, limit_cfg, MIN_VOTES, custom_std, custom_mod, USE_INVERSE, None)
@@ -833,39 +847,42 @@ def main():
 
             with tab4:
                 st.subheader("🧬 AI GENETIC HUNTER (Mobile Matrix)")
-                st.info("⚡ Đã kích hoạt Matrix Engine: Tốc độ quét tăng gấp 10 lần.")
+                st.info("⚡ Chế độ Matrix siêu tốc + Tùy chọn nhịp cầu.")
                 
                 c1, c2 = st.columns([1, 1.5])
                 with c1:
                     target_hunter = st.date_input("Ngày dự đoán:", value=last_d, key="t_hunter")
+                    days_backtest = st.number_input("Số ngày Test:", min_value=3, max_value=20, value=5, help="Số ngày quá khứ để kiểm tra hiệu quả.")
                     max_nums_hunter = st.slider("Max Số Lượng:", 40, 80, 65, key="mx_hunter")
                     
                     # CẤU HÌNH MOBILE TỐI ƯU
                     pop_size = 30  
                     n_gen = 20     
                     
-                    st.caption(f"⚡ Mobile Mode: {pop_size * n_gen} kịch bản.")
+                    st.caption(f"⚡ Đang quét: {pop_size * n_gen} bộ x {days_backtest} ngày.")
 
                     if st.button("🚀 CHẠY SĂN NHANH", type="primary"):
                         check_past_dates = []
                         check_d = target_hunter - timedelta(days=1)
                         scan_limit = 0
-                        while len(check_past_dates) < 5 and scan_limit < 40:
+                        # Lấy sơ bộ để check dữ liệu
+                        while len(check_past_dates) < days_backtest and scan_limit < 40:
                             if check_d in kq_db and check_d in data_cache:
                                 check_past_dates.append(check_d)
                             check_d -= timedelta(days=1)
                             scan_limit += 1
                         
-                        if len(check_past_dates) < 3:
-                            st.error(f"🔴 Thiếu dữ liệu! Cần ít nhất 3 ngày quá khứ để học.")
+                        if len(check_past_dates) < min(3, days_backtest):
+                            st.error(f"🔴 Thiếu dữ liệu! Cần ít nhất {days_backtest} ngày có KQ.")
                         else:
-                            st.toast("🚀 Đang khởi động Matrix Engine...", icon="⚡") 
+                            st.toast(f"🚀 Đang quét {days_backtest} ngày...", icon="⚡") 
                             prog_bar = st.progress(0)
                             status_txt = st.empty()
                             
                             best_scenarios = run_genetic_search(
                                 target_hunter, data_cache, kq_db, limit_cfg, 
                                 MIN_VOTES, USE_INVERSE, max_nums_hunter,
+                                test_days_limit=days_backtest, # Tham số mới
                                 generations=n_gen, population_size=pop_size,
                                 progress_bar=prog_bar, status_text=status_txt
                             )
@@ -874,7 +891,7 @@ def main():
                             if not best_scenarios:
                                 status_txt.warning("⚠️ Không tìm thấy dàn đẹp.")
                             else:
-                                status_txt.success("✅ Đã tìm thấy cấu hình ngon!")
+                                status_txt.success(f"✅ Xong! Tìm thấy {len(best_scenarios)} bộ.")
                                 st.session_state['best_scenarios'] = best_scenarios
                 
                 with c2:
@@ -883,13 +900,16 @@ def main():
                         if not scenarios:
                             st.info("👈 Bấm nút để bắt đầu săn.")
                         else:
-                            st.success(f"🎉 Kết quả ({len(scenarios)} bộ):")
+                            st.success(f"🎉 Kết quả Top 5:")
                             for idx, sc in enumerate(scenarios):
                                 with st.expander(f"🏅 Top {idx+1} | Win {sc['WinRate']:.0f}% | {sc['AvgNums']:.1f} số", expanded=(idx==0)):
+                                    # HIỂN THỊ LỊCH SỬ NHỊP CẦU
+                                    st.write("📊 **Lịch sử nhịp cầu (Cũ -> Mới):**")
+                                    st.code(f"{sc['HistoryDates']}\n{sc['HistoryIcons']}")
+                                    
                                     st.write("**Điểm số:**")
                                     st.json(sc['Scores'])
                                     
-                                    # SỬA LỖI Ở ĐÂY: Dùng on_click thay vì if st.button
                                     st.button(
                                         f"👉 Áp dụng Ngay", 
                                         key=f"apply_gen_{idx}",
