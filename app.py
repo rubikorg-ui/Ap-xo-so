@@ -12,14 +12,14 @@ from functools import lru_cache
 # 1. CẤU HÌNH HỆ THỐNG
 # ==============================================================================
 st.set_page_config(
-    page_title="Quang Pro V42.5 - Mobile Hunter", 
+    page_title="Quang Pro V42.6 - Strict Hunter", 
     page_icon="🧬", 
     layout="wide",
     initial_sidebar_state="collapsed" 
 )
 
-st.title("🧬 Quang Handsome: V42.5 Hunter Pro")
-st.caption("🚀 Matrix Engine | Tùy chỉnh Backtest | Soi nhịp cầu gãy/thông")
+st.title("🧬 Quang Handsome: V42.6 Strict Hunter")
+st.caption("🚀 AI Hunter chạy Logic Gốc | Chính xác tuyệt đối từng bước Lọc/Cắt")
 
 # Regex & Sets
 RE_NUMS = re.compile(r'\d+')
@@ -445,104 +445,63 @@ def analyze_group_performance(start_date, end_date, cut_limit, score_map, _cache
     return df_rep, pd.DataFrame(detailed_rows)
 
 # ==============================================================================
-# 3. AUTO-HUNTER OPTIMIZED (MATRIX ENGINE)
+# 3. AUTO-HUNTER STRICT LOGIC (SỬ DỤNG LOGIC GỐC ĐỂ CHẤM ĐIỂM)
 # ==============================================================================
 
-def prepare_hunter_data(test_dates, _cache, _kq_db, rolling_window):
+def evaluate_fitness_strict(genome, test_dates, _cache, _kq_db, limits_config, min_v, use_inv):
     """
-    Chuẩn bị dữ liệu thô (đếm số sẵn) cho tất cả các ngày test.
-    Trả về list các (kq, dataframe_tan_suat_cua_ngay_do, date_obj)
+    Sử dụng chính hàm calculate_v24_logic_only để chấm điểm.
+    Đảm bảo 100% logic lọc nhóm, cắt top, giao dàn.
     """
-    prepared_days = []
+    wins = 0
+    total_nums = 0
+    valid_days = 0
+    history = []
+    
+    # Ở đây chúng ta phải dùng cùng 1 bộ điểm cho cả STD và MOD để test nhanh
+    # Hoặc cải tiến sau này là tìm 2 bộ điểm riêng biệt.
+    # Hiện tại: Giả định tìm bộ STD tốt nhất, gán nó cho cả MOD (hoặc giữ MOD cố định)
+    # Để đơn giản và hiệu quả: Gán genome cho cả STD và MOD
     
     for d in test_dates:
         if d not in _kq_db: continue
         kq = _kq_db[d]
         
-        # Logic lấy past_dates giống hệt calculate_v24...
-        past_dates = []
-        check_d = d - timedelta(days=1)
-        while len(past_dates) < rolling_window:
-            if check_d in _cache and check_d in _kq_db: past_dates.append(check_d)
-            check_d -= timedelta(days=1)
-            if (d - check_d).days > 45: break
-            
-        # Tổng hợp tần suất cho ngày test d
-        day_matrix = pd.DataFrame(0, index=[f"{x:02d}" for x in range(100)], columns=[f"M{i}" for i in range(11)])
+        # GỌI HÀM CORE LOGIC (Không dùng Matrix nữa)
+        res = calculate_v24_logic_only(
+            target_date=d,
+            rolling_window=10, # Chu kỳ xét nhóm
+            _cache=_cache,
+            _kq_db=_kq_db,
+            limits_config=limits_config,
+            min_votes=min_v,
+            score_std=genome, # Dùng genome đang test
+            score_mod=genome, # Dùng luôn genome cho mod
+            use_inverse=use_inv,
+            manual_groups=None
+        )
         
-        has_data = False
-        for pd_date in past_dates:
-            df = _cache[pd_date]['df']
-            for col in df.columns:
-                clean_col = str(col).upper().replace(' ', '').replace('M10', 'MX')
-                m_idx = -1
-                if 'MX' in clean_col: m_idx = 10
-                else:
-                    for k in range(10): 
-                        if f"M{k}" in clean_col: m_idx = k; break
-                
-                if m_idx == -1: continue
-                
-                vals = df[col].astype(str).str.upper()
-                mask_bad = vals.str.contains(r'N|NGHI|SX|XIT|MISS|TRUOT|NGHỈ|LỖI', regex=True)
-                
-                nums = vals[~mask_bad].str.findall(r'\d+').explode().dropna()
-                nums = nums.str.strip().str.zfill(2)
-                nums = nums[nums.str.len() == 2]
-                
-                counts = nums.value_counts()
-                if not counts.empty:
-                    day_matrix[f"M{m_idx}"] = day_matrix[f"M{m_idx}"].add(counts, fill_value=0)
-                    has_data = True
-                    
-        if has_data:
-            prepared_days.append({
-                'date': d,
-                'kq': kq,
-                'matrix': day_matrix
-            })
-            
-    return prepared_days
-
-def evaluate_fitness_optimized(genome, prepared_days, max_nums):
-    """
-    Tính fitness và trả về cả lịch sử Win/Loss
-    """
-    wins = 0
-    total_nums = 0
-    valid_days = 0
-    history = [] # Lưu trạng thái W/L từng ngày
-    
-    score_vec = pd.Series([genome.get(f"M{i}", 0) for i in range(11)], index=[f"M{i}" for i in range(11)])
-    
-    for day_obj in prepared_days:
-        kq = day_obj['kq']
-        matrix = day_obj['matrix']
-        
-        scores = matrix.dot(score_vec)
-        scores = scores[scores > 0]
-        if scores.empty: 
+        if not res: 
             history.append("L")
             continue
+
+        # Lấy dàn Final (Giao giữa Gốc và Mod đã qua lọc nhóm)
+        final_set = res['dan_final']
         
-        df_res = scores.to_frame(name='S')
-        df_res['N_Int'] = df_res.index.astype(int)
-        df_res = df_res.sort_values(by=['S', 'N_Int'], ascending=[False, True])
-        
-        top_nums = df_res.index[:max_nums].tolist()
-        
-        is_win = kq in top_nums
+        is_win = kq in final_set
         history.append("W" if is_win else "L")
         
         if is_win: wins += 1
-        total_nums += len(top_nums)
+        total_nums += len(final_set)
         valid_days += 1
         
     if valid_days == 0: return 0, 0, 999, history
     
     avg_nums = total_nums / valid_days
     win_rate = (wins / valid_days) * 100
-    fitness = win_rate * 10 - avg_nums
+    
+    # Công thức Fitness: Ưu tiên WinRate, sau đó ưu tiên Số lượng ít
+    fitness = win_rate * 50 - avg_nums
     
     return fitness, win_rate, avg_nums, history
 
@@ -571,37 +530,32 @@ def crossover_genome(parent1, parent2):
         child[key] = parent1[key] if random.random() > 0.5 else parent2[key]
     return child
 
-def run_genetic_search(target_date, _cache, _kq_db, fixed_limits, min_v, use_inv, max_allowed_nums, 
-                      test_days_limit, generations=10, population_size=30, progress_bar=None, status_text=None):
+def run_genetic_search(target_date, _cache, _kq_db, limits_config, min_v, use_inv, 
+                      test_days_limit, generations=10, population_size=20, progress_bar=None, status_text=None):
     
-    # 1. Xác định ngày test (Theo số lượng user nhập)
+    # 1. Xác định ngày test
     test_dates = []
     check = target_date - timedelta(days=1)
-    
-    # Lấy đủ số ngày user yêu cầu
     while len(test_dates) < test_days_limit: 
         if check in _kq_db and check in _cache: test_dates.append(check)
         check -= timedelta(days=1)
-        if (target_date - check).days > (test_days_limit * 2 + 30): break # Giới hạn scan
+        if (target_date - check).days > (test_days_limit * 2 + 30): break
     
     if not test_dates: return []
 
-    # 2. CHUẨN BỊ DỮ LIỆU
-    if status_text: status_text.text("⚙️ Đang mã hóa dữ liệu (Matrix)...")
-    prepared_data = prepare_hunter_data(test_dates, _cache, _kq_db, rolling_window=10)
-    
-    # 3. Chạy Genetic
+    # 2. Khởi tạo
     population = [generate_random_genome() for _ in range(population_size)]
     population[0] = {f"M{i}": 0 for i in range(11)}; population[0]['M10']=50 
     
     best_solution = None
     history_best = []
 
+    # 3. Vòng lặp Tiến hóa
     for gen in range(generations):
         scored_pop = []
         for genome in population:
-            # GỌI HÀM ĐÁNH GIÁ (Nhận thêm History)
-            fit, wr, avg, hist = evaluate_fitness_optimized(genome, prepared_data, max_allowed_nums)
+            # GỌI HÀM STRICT LOGIC
+            fit, wr, avg, hist = evaluate_fitness_strict(genome, test_dates, _cache, _kq_db, limits_config, min_v, use_inv)
             scored_pop.append({'genome': genome, 'fitness': fit, 'wr': wr, 'avg': avg, 'hist': hist})
         
         scored_pop.sort(key=lambda x: x['fitness'], reverse=True)
@@ -612,7 +566,7 @@ def run_genetic_search(target_date, _cache, _kq_db, fixed_limits, min_v, use_inv
         history_best.append(best_solution)
 
         if status_text:
-            msg = f"🏃 Gen {gen+1}/{generations} | 🚀 Matrix Engine | Best: {current_best['wr']:.0f}% ({current_best['avg']:.0f} số)"
+            msg = f"🏃 Gen {gen+1}/{generations} | 🐢 Logic Gốc | Best: {current_best['wr']:.0f}% ({current_best['avg']:.0f} số)"
             status_text.markdown(msg)
         if progress_bar: progress_bar.progress((gen + 1) / generations)
 
@@ -628,21 +582,12 @@ def run_genetic_search(target_date, _cache, _kq_db, fixed_limits, min_v, use_inv
 
     unique_solutions = []
     seen = set()
-    
-    # Format lại ngày để hiển thị
     date_labels = [d.strftime("%d/%m") for d in test_dates] 
     
     for sol in sorted(history_best, key=lambda x: x['fitness'], reverse=True):
         s_str = str(sol['genome'])
         if s_str not in seen:
-            # Ghép lịch sử W/L với ngày
-            # prepared_data thứ tự là ngày mới -> cũ (do loop test_dates)
-            # hist cũng thứ tự tương ứng
-            # Ta đảo ngược để hiển thị: Cũ -> Mới cho dễ nhìn nhịp
-            
-            raw_hist = sol['hist'] # Ví dụ ['W', 'L', 'W'] (Mới -> Cũ)
-            
-            # Map icon
+            raw_hist = sol['hist']
             icon_hist = ["✅" if h == 'W' else "❌" for h in raw_hist]
             
             # Đảo ngược để hiện từ quá khứ -> hiện tại
@@ -650,7 +595,7 @@ def run_genetic_search(target_date, _cache, _kq_db, fixed_limits, min_v, use_inv
             display_date_str = " | ".join(reversed(date_labels))
             
             unique_solutions.append({
-                "Name": f"AI Hunter-{random.randint(100,999)}",
+                "Name": f"AI Logic-{random.randint(100,999)}",
                 "WinRate": sol['wr'],
                 "AvgNums": sol['avg'],
                 "Scores": sol['genome'],
@@ -846,20 +791,24 @@ def main():
                         st.dataframe(df_detail, use_container_width=True)
 
             with tab4:
-                st.subheader("🧬 AI GENETIC HUNTER (Mobile Matrix)")
-                st.info("⚡ Chế độ Matrix siêu tốc + Tùy chọn nhịp cầu.")
+                st.subheader("🧬 AI GENETIC HUNTER (Strict Logic)")
+                st.info("⚡ Chế độ chạy Logic Gốc 100% (Không dùng Matrix).")
                 
                 c1, c2 = st.columns([1, 1.5])
                 with c1:
                     target_hunter = st.date_input("Ngày dự đoán:", value=last_d, key="t_hunter")
                     days_backtest = st.number_input("Số ngày Test:", min_value=3, max_value=20, value=5, help="Số ngày quá khứ để kiểm tra hiệu quả.")
-                    max_nums_hunter = st.slider("Max Số Lượng:", 40, 80, 65, key="mx_hunter")
                     
-                    # CẤU HÌNH MOBILE TỐI ƯU
-                    pop_size = 30  
-                    n_gen = 20     
+                    # Vì AI Strict logic tự cắt Top theo cấu hình L12/L34 nên không cần Max Số Lượng nữa
+                    # Nhưng ta vẫn để để user tham khảo nếu cần lọc thêm
+                    # max_nums_hunter = st.slider("Max Số Lượng:", 40, 80, 65, key="mx_hunter")
+                    
+                    # CẤU HÌNH MOBILE NHẸ
+                    pop_size = 20  
+                    n_gen = 5 # Giảm gen vì chạy Strict khá nặng
                     
                     st.caption(f"⚡ Đang quét: {pop_size * n_gen} bộ x {days_backtest} ngày.")
+                    st.warning("⚠️ Chế độ này chạy chậm hơn nhưng chính xác tuyệt đối logic lọc nhóm.")
 
                     if st.button("🚀 CHẠY SĂN NHANH", type="primary"):
                         check_past_dates = []
@@ -881,8 +830,8 @@ def main():
                             
                             best_scenarios = run_genetic_search(
                                 target_hunter, data_cache, kq_db, limit_cfg, 
-                                MIN_VOTES, USE_INVERSE, max_nums_hunter,
-                                test_days_limit=days_backtest, # Tham số mới
+                                MIN_VOTES, USE_INVERSE, 
+                                test_days_limit=days_backtest,
                                 generations=n_gen, population_size=pop_size,
                                 progress_bar=prog_bar, status_text=status_txt
                             )
