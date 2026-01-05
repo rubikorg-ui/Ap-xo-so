@@ -12,14 +12,14 @@ from functools import lru_cache
 # 1. CẤU HÌNH HỆ THỐNG
 # ==============================================================================
 st.set_page_config(
-    page_title="Quang Pro V42.3 - Mobile Visual", 
+    page_title="Quang Pro V42.4 - Mobile Pro", 
     page_icon="🧬", 
     layout="wide",
     initial_sidebar_state="collapsed" 
 )
 
-st.title("🧬 Quang Handsome: V42.3 Mobile Visual")
-st.caption("🚀 Hiện tiến trình chi tiết | Báo lỗi thiếu data | Genetic Ultra Core")
+st.title("🧬 Quang Handsome: V42.4 Mobile Pro")
+st.caption("🚀 Tích hợp 3 Cấu hình AI | Scan Mobile Tối ưu | Logic Gốc 100%")
 
 # Regex & Sets
 RE_NUMS = re.compile(r'\d+')
@@ -582,13 +582,21 @@ SCORES_PRESETS = {
         "STD": [0, 1, 2, 3, 4, 5, 6, 7, 15, 25, 50],
         "MOD": [0, 5, 10, 15, 30, 30, 50, 35, 25, 25, 40]
     },
-    "Miền Nam (Theo Ảnh)": {
-        "STD": [50, 8, 9, 10, 10, 30, 40, 30, 25, 30, 30],
-        "MOD": [0, 5, 10, 15, 30, 30, 50, 35, 25, 25, 40]
-    },
     "Miền Trung": {
         "STD": [60, 8, 9, 10, 10, 30, 70, 30, 30, 30, 30],
         "MOD": [0, 5, 10, 15, 30, 30, 50, 35, 25, 25, 40]
+    },
+    "🔥 CH1: Bám Đuôi (An Toàn)": {
+        "STD": [10, 20, 30, 30, 30, 30, 40, 40, 50, 50, 70],
+        "MOD": [10, 20, 30, 30, 30, 30, 40, 40, 50, 50, 70]
+    },
+    "⚡ CH2: Đột Biến (Săn Số Ít)": {
+        "STD": [60, 0, 0, 10, 10, 30, 50, 30, 0, 30, 20],
+        "MOD": [60, 0, 0, 10, 10, 30, 50, 30, 0, 30, 20]
+    },
+    "⚖️ CH3: Cân Bằng": {
+        "STD": [30, 25, 20, 20, 20, 30, 40, 30, 20, 25, 50],
+        "MOD": [30, 25, 20, 20, 20, 30, 40, 30, 20, 25, 50]
     }
 }
 
@@ -744,39 +752,37 @@ def main():
                         st.dataframe(df_detail, use_container_width=True)
 
             with tab4:
-                st.subheader("🧬 AI GENETIC HUNTER (Săn Tìm Cấu Hình)")
-                st.info("Sử dụng giải thuật di truyền để thử hàng ngàn tổ hợp điểm số, tìm ra cấu hình 'độc nhất' phù hợp với dữ liệu hiện tại.")
+                st.subheader("🧬 AI GENETIC HUNTER (Bản Mobile Siêu Tốc)")
+                st.info("Chế độ tối ưu cho điện thoại: Quét nhanh, ít tốn Pin và không bị treo.")
                 
                 c1, c2 = st.columns([1, 1.5])
                 with c1:
                     target_hunter = st.date_input("Ngày dự đoán:", value=last_d, key="t_hunter")
-                    max_nums_hunter = st.slider("Max Số Lượng chấp nhận:", 40, 85, 65, key="mx_hunter")
+                    max_nums_hunter = st.slider("Max Số Lượng:", 40, 80, 65, key="mx_hunter")
                     
-                    st.write("**Cấu hình AI Scan:**")
-                    pop_size = st.select_slider("Kích thước quần thể (Mẫu/Thế hệ):", options=[20, 50, 100], value=50)
-                    n_gen = st.select_slider("Số thế hệ (Vòng lặp tiến hóa):", options=[5, 10, 20, 50], value=10)
+                    # CẤU HÌNH CỐ ĐỊNH CHO MOBILE (20 mẫu x 10 thế hệ = 200 kịch bản)
+                    # Đây là con số đẹp để chạy xong trong 15-20s
+                    pop_size = 20  
+                    n_gen = 10     
                     
-                    total_scenarios = pop_size * n_gen
-                    st.caption(f"⚡ AI sẽ chạy thử nghiệm khoảng **{total_scenarios}** cấu hình.")
+                    st.caption(f"⚡ Chế độ Mobile: AI sẽ kiểm tra nhanh **{pop_size * n_gen}** kịch bản.")
 
-                    if st.button("🧬 BẮT ĐẦU SĂN (DEEP SCAN)", type="primary"):
+                    if st.button("🚀 CHẠY SĂN NHANH", type="primary"):
                         # --- KIỂM TRA DỮ LIỆU ---
                         check_past_dates = []
                         check_d = target_hunter - timedelta(days=1)
                         scan_limit = 0
-                        while len(check_past_dates) < 7 and scan_limit < 60:
+                        while len(check_past_dates) < 5 and scan_limit < 40:
                             if check_d in kq_db and check_d in data_cache:
                                 check_past_dates.append(check_d)
                             check_d -= timedelta(days=1)
                             scan_limit += 1
                         
-                        if len(check_past_dates) < 5:
-                            st.error(f"🔴 KHÔNG CHẠY ĐƯỢC: Thiếu dữ liệu lịch sử!")
-                            st.warning(f"AI cần ít nhất 5 ngày có KQ trước ngày {target_hunter.strftime('%d/%m')} để học.")
-                            st.write(f"Hiện tại chỉ tìm thấy: {len(check_past_dates)} ngày.")
-                            st.info("👉 Gợi ý: Hãy upload thêm file của tháng trước đó.")
+                        if len(check_past_dates) < 3:
+                            st.error(f"🔴 Thiếu dữ liệu! Cần ít nhất 3 ngày quá khứ để học.")
+                            st.info("Hãy upload thêm file tháng trước.")
                         else:
-                            st.toast("🚀 Đủ dữ liệu! AI đang khởi động...", icon="🧬") 
+                            st.toast("🚀 Đang xử lý...", icon="⚡") 
                             prog_bar = st.progress(0)
                             status_txt = st.empty()
                             
@@ -789,23 +795,23 @@ def main():
                             
                             prog_bar.empty()
                             if not best_scenarios:
-                                status_txt.warning("⚠️ Đã chạy xong nhưng không tìm được dàn nào dưới số lượng quy định (Max Số Lượng). Hãy tăng Max lên.")
+                                status_txt.warning("⚠️ Không tìm thấy dàn đẹp. Hãy tăng 'Max Số Lượng'.")
                             else:
-                                status_txt.success("✅ Hoàn tất quá trình tiến hóa!")
+                                status_txt.success("✅ Đã tìm thấy cấu hình ngon!")
                                 st.session_state['best_scenarios'] = best_scenarios
                 
                 with c2:
                     if 'best_scenarios' in st.session_state:
                         scenarios = st.session_state['best_scenarios']
                         if not scenarios:
-                            st.warning("⚠️ Không tìm thấy cấu hình nào thỏa mãn điều kiện.")
+                            st.info("👈 Bấm nút để bắt đầu săn.")
                         else:
-                            st.success(f"🎉 Tìm thấy {len(scenarios)} cấu hình ưu tú nhất!")
+                            st.success(f"🎉 Kết quả ({len(scenarios)} bộ):")
                             for idx, sc in enumerate(scenarios):
-                                with st.expander(f"🏅 #{idx+1} ({sc['Name']}) | Win {sc['WinRate']:.1f}% | TB {sc['AvgNums']:.1f} số", expanded=(idx==0)):
-                                    st.write("Cấu hình điểm:")
+                                with st.expander(f"🏅 Top {idx+1} | Win {sc['WinRate']:.0f}% | {sc['AvgNums']:.1f} số", expanded=(idx==0)):
+                                    st.write("**Điểm số:**")
                                     st.json(sc['Scores'])
-                                    if st.button(f"👉 Áp dụng Cấu hình #{idx+1}", key=f"apply_gen_{idx}"):
+                                    if st.button(f"👉 Áp dụng Ngay", key=f"apply_gen_{idx}"):
                                         apply_hunter_callback(sc['Scores'])
 
 if __name__ == "__main__":
