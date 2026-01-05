@@ -11,14 +11,14 @@ from functools import lru_cache
 # 1. CẤU HÌNH HỆ THỐNG
 # ==============================================================================
 st.set_page_config(
-    page_title="Quang Pro V42 - Stable Core", 
+    page_title="Quang Pro V42.1 - Stable Core", 
     page_icon="🛡️", 
     layout="wide",
     initial_sidebar_state="collapsed" 
 )
 
-st.title("🛡️ Quang Handsome: V42 Stable Core")
-st.caption("🚀 Fix lỗi StreamlitAPIException | Callback System | Logic Gốc 100%")
+st.title("🛡️ Quang Handsome: V42.1 Stable Core")
+st.caption("🚀 Fix lỗi StreamlitAPIException | Tối ưu Data Loader | Cấu hình Miền Trung")
 
 # Regex & Sets
 RE_NUMS = re.compile(r'\d+')
@@ -110,13 +110,26 @@ def load_data_v24(files):
     kq_db = {}
     err_logs = []
     file_status = []
+    
+    # Sắp xếp file để đảm bảo thứ tự
     files = sorted(files, key=lambda x: x.name)
 
+    # DANH SÁCH FILE CẦN BỎ QUA (IGNORE LIST)
+    IGNORE_KEYWORDS = ['N.CSV', 'BPĐ', 'BPD', 'BANG PHU', '~$', 'DS.CSV']
+
     for file in files:
-        if file.name.upper().startswith('~$') or 'N.CSV' in file.name.upper(): continue
+        f_name_upper = file.name.upper()
+        
+        # 1. BỘ LỌC FILE RÁC/KHÔNG CẦN THIẾT
+        if any(kw in f_name_upper for kw in IGNORE_KEYWORDS): 
+            continue
+            
         f_m, f_y, date_from_name = extract_meta_from_filename(file.name)
+        
         try:
             dfs_to_process = []
+            
+            # XỬ LÝ FILE EXCEL
             if file.name.endswith('.xlsx'):
                 xls = pd.ExcelFile(file, engine='openpyxl')
                 for sheet in xls.sheet_names:
@@ -129,15 +142,22 @@ def load_data_v24(files):
                             if len(parts) >= 3 and parts[2] > 2000: y_s = parts[2]; m_s = parts[1]
                             s_date = datetime.date(y_s, m_s, d_s)
                     except: pass
+                    
                     if s_date:
                         preview = pd.read_excel(xls, sheet_name=sheet, header=None, nrows=20, engine='openpyxl')
                         h_row = find_header_row(preview)
                         df = pd.read_excel(xls, sheet_name=sheet, header=h_row, engine='openpyxl')
+                        # Fix lỗi cột M 1 0 do merge cell
                         df.columns = [str(c).strip().upper().replace('M 1 0', 'M10') for c in df.columns]
                         dfs_to_process.append((s_date, df))
                 file_status.append(f"✅ Excel: {file.name}")
+            
+            # XỬ LÝ FILE CSV (Dạng data của bạn)
             elif file.name.endswith('.csv'):
-                if not date_from_name: continue
+                if not date_from_name: 
+                    err_logs.append(f"⚠️ Bỏ qua '{file.name}': Không tìm thấy ngày trong tên file")
+                    continue
+                
                 try:
                     preview = pd.read_csv(file, header=None, nrows=20, encoding='utf-8')
                     file.seek(0)
@@ -145,10 +165,14 @@ def load_data_v24(files):
                 except:
                     file.seek(0)
                     try:
+                        # Thử encoding khác cho file tiếng Việt cũ
                         preview = pd.read_csv(file, header=None, nrows=20, encoding='latin-1')
                         file.seek(0)
                         df_raw = pd.read_csv(file, header=None, encoding='latin-1')
-                    except: continue
+                    except: 
+                        err_logs.append(f"❌ Lỗi encoding '{file.name}'")
+                        continue
+                
                 h_row = find_header_row(preview)
                 df = df_raw.iloc[h_row+1:].copy()
                 df.columns = df_raw.iloc[h_row]
@@ -156,30 +180,40 @@ def load_data_v24(files):
                 dfs_to_process.append((date_from_name, df))
                 file_status.append(f"✅ CSV: {file.name}")
 
+            # XỬ LÝ DATAFRAME SAU KHI LOAD
             for t_date, df in dfs_to_process:
                 df.columns = [str(c).strip().upper() for c in df.columns]
                 hist_map = {}
+                
+                # Quét các cột ngày tháng trong file (nếu có cột lịch sử)
                 for col in df.columns:
                     if "UNNAMED" in col: continue
                     d_obj = parse_date_smart(col, f_m, f_y)
                     if d_obj: hist_map[d_obj] = col
+                
+                # Tìm KQ (Kết quả) để lưu vào DB
                 kq_row = None
                 if not df.empty:
+                    # Chỉ quét 2 cột đầu để tìm chữ KQ, tránh quét toàn bảng gây chậm
                     for c_idx in range(min(2, len(df.columns))):
                         col_check = df.columns[c_idx]
                         mask_kq = df[col_check].astype(str).str.upper().str.contains(r'KQ|KẾT QUẢ')
                         if mask_kq.any():
                             kq_row = df[mask_kq].iloc[0]
                             break
+                
                 if kq_row is not None:
                     for d_val, c_name in hist_map.items():
                         val = str(kq_row[c_name])
                         nums = get_nums(val)
                         if nums: kq_db[d_val] = nums[0]
+                
                 cache[t_date] = {'df': df, 'hist_map': hist_map}
+        
         except Exception as e:
-            err_logs.append(f"Lỗi '{file.name}': {str(e)}")
+            err_logs.append(f"❌ Lỗi nghiêm trọng '{file.name}': {str(e)}")
             continue
+            
     return cache, kq_db, file_status, err_logs
 
 def fast_get_top_nums(df, p_map_dict, s_map_dict, top_n, min_v, inverse):
@@ -540,6 +574,10 @@ SCORES_PRESETS = {
     },
     "Miền Nam (Theo Ảnh)": {
         "STD": [50, 8, 9, 10, 10, 30, 40, 30, 25, 30, 30],
+        "MOD": [0, 5, 10, 15, 30, 30, 50, 35, 25, 25, 40]
+    },
+    "Miền Trung": {
+        "STD": [60, 8, 9, 10, 10, 30, 70, 30, 30, 30, 30],
         "MOD": [0, 5, 10, 15, 30, 30, 50, 35, 25, 25, 40]
     }
 }
