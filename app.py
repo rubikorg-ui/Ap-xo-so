@@ -36,6 +36,13 @@ SCORES_PRESETS = {
         "STD": [0, 1, 2, 3, 4, 5, 6, 7, 15, 25, 50],
         "MOD": [0, 5, 10, 15, 30, 30, 50, 35, 25, 25, 40],
         "LIMITS": {'l12': 82, 'l34': 76, 'l56': 70, 'mod': 88}
+    },
+    "Miền Nam (Experimental)": {
+        # Điểm: Rải đều để bắt cầu ngắn (M0-M2 có điểm)
+        "STD": [10, 15, 20, 25, 30, 35, 40, 50, 30, 20, 10],
+        "MOD": [10, 15, 20, 25, 30, 35, 40, 50, 30, 20, 10],
+        # Limits: Tăng lên để lấy nhiều số hơn (An toàn cho đài ảo)
+        "LIMITS": {'l12': 85, 'l34': 80, 'l56': 75, 'mod': 90}
     }
 }
 
@@ -99,20 +106,17 @@ def find_header_row(df_preview):
             return idx
     return 3
 
-# --- ĐÂY LÀ HÀM DUY NHẤT TÔI SỬA ĐỂ ĐỌC ĐƯỢC FILE 1.12.CSV CỦA BẠN ---
+# --- FIX: HÀM ĐỌC TÊN FILE CẢI TIẾN (ĐỂ ĐỌC ĐƯỢC 1.12.CSV) ---
 def extract_meta_from_filename(filename):
     clean_name = filename.upper().replace(".CSV", "").replace(".XLSX", "")
     clean_name = re.sub(r'\s*-\s*', '-', clean_name) 
     
-    # Tìm năm
     y_match = re.search(r'202[0-9]', clean_name)
     y_global = int(y_match.group(0)) if y_match else datetime.datetime.now().year
     
-    # Tìm tháng
     m_match = re.search(r'(?:THANG|THÁNG|T)[^0-9]*(\d{1,2})', clean_name)
     m_global = int(m_match.group(1)) if m_match else 12
     
-    # Tìm ngày đầy đủ (dd.mm.yyyy)
     full_date_match = re.search(r'(\d{1,2})[\.\-](\d{1,2})(?:[\.\-]20\d{2})?', clean_name)
     if full_date_match:
         try:
@@ -124,7 +128,7 @@ def extract_meta_from_filename(filename):
             return m, y, datetime.date(y, m, d)
         except: pass
     
-    # --- CẢI TIẾN: Bắt ngày lẻ ở đuôi (1.12, 05, 1) ---
+    # Bắt ngày lẻ ở đuôi (VD: ...- 1.12 hoặc ...- 05)
     single_day_match = re.findall(r'(\d{1,2})$', clean_name)
     if single_day_match:
         try:
