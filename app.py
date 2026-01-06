@@ -11,14 +11,14 @@ from functools import lru_cache
 # 1. CẤU HÌNH HỆ THỐNG & PRESETS
 # ==============================================================================
 st.set_page_config(
-    page_title="Quang Pro V52 - Final Logic", 
+    page_title="Quang Pro V53 - UI Restore", 
     page_icon="🛡️", 
     layout="wide",
     initial_sidebar_state="collapsed" 
 )
 
-st.title("🛡️ Quang Handsome: V52 Final Logic")
-st.caption("🚀 Hybrid = Gốc 1 ∩ Gốc 2 | Backtest Tùy Chọn View | No Excel Error")
+st.title("🛡️ Quang Handsome: V53 UI Restore")
+st.caption("🚀 Khôi phục tùy chọn Hiển thị | Hybrid = Gốc 1 ∩ Gốc 2 | Backtest Mode")
 
 # --- CÁC CẤU HÌNH MẪU (PRESETS) ---
 SCORES_PRESETS = {
@@ -543,6 +543,17 @@ def main():
             L_TOP_56 = st.number_input("Top 5 & 6 lấy:", value=70, step=1, key="L56")
             LIMIT_MODIFIED = st.number_input("Top 1 Modified lấy:", value=88, step=1, key="LMOD")
 
+        st.markdown("---")
+        # --- PHẦN KHÔI PHỤC TÙY CHỌN HIỂN THỊ ---
+        with st.expander("👁️ Hiển thị (Dự Đoán)", expanded=True):
+            c_v1, c_v2 = st.columns(2)
+            with c_v1:
+                show_goc = st.checkbox("Hiện Gốc (Current)", value=True)
+                show_mod = st.checkbox("Hiện Mod (Current)", value=False)
+            with c_v2:
+                show_final = st.checkbox("Hiện Final (Current)", value=True)
+                show_hybrid = st.checkbox("Hiện HYBRID (VIP)", value=True)
+
         MIN_VOTES = st.number_input("Vote tối thiểu:", min_value=1, max_value=10, value=1)
         USE_INVERSE = st.checkbox("Chấm Điểm Đảo (Ngược)", value=False)
         
@@ -596,30 +607,42 @@ def main():
                     
                     if not rr['err']:
                         st.info(f"Phân nhóm nguồn: {res['source_col']}")
-                        cols_to_show = [
-                            {"t": f"Gốc ({len(res['dan_goc'])})", "d": res['dan_goc'], "k": "Goc"},
-                            {"t": f"Mod ({len(res['dan_mod'])})", "d": res['dan_mod'], "k": "Mod"},
-                            {"t": f"Final ({len(res['dan_final'])})", "d": res['dan_final'], "k": "Final"},
-                            {"t": f"💎 Hybrid (Giao Gốc) ({len(rr['hybrid'])})", "d": rr['hybrid'], "k": "Hybrid"}
-                        ]
+                        
+                        # --- XỬ LÝ HIỂN THỊ THEO CHECKBOX ---
+                        cols_to_show = []
+                        if show_goc: 
+                            cols_to_show.append({"t": f"Gốc ({len(res['dan_goc'])})", "d": res['dan_goc'], "k": "Goc"})
+                        if show_mod: 
+                            cols_to_show.append({"t": f"Mod ({len(res['dan_mod'])})", "d": res['dan_mod'], "k": "Mod"})
+                        if show_final: 
+                            cols_to_show.append({"t": f"Final ({len(res['dan_final'])})", "d": res['dan_final'], "k": "Final"})
+                        if show_hybrid: 
+                            cols_to_show.append({"t": f"💎 Hybrid (Giao Gốc) ({len(rr['hybrid'])})", "d": rr['hybrid'], "k": "Hybrid"})
 
-                        cols = st.columns(len(cols_to_show))
-                        for i, c_obj in enumerate(cols_to_show):
-                            with cols[i]:
-                                st.caption(c_obj['t'])
-                                st.text_area(c_obj['k'], ",".join(c_obj['d']), height=150)
+                        if cols_to_show:
+                            cols = st.columns(len(cols_to_show))
+                            for i, c_obj in enumerate(cols_to_show):
+                                with cols[i]:
+                                    st.caption(c_obj['t'])
+                                    st.text_area(c_obj['k'], ",".join(c_obj['d']), height=150)
                         
                         if target in kq_db:
                             real = kq_db[target]
                             st.markdown("### 🏁 KẾT QUẢ")
                             c_r1, c_r2, c_r3 = st.columns(3)
                             with c_r1: st.metric("KQ", real)
+                            
                             with c_r2:
-                                if real in res['dan_final']: st.success(f"Final: WIN")
-                                else: st.error("Final: MISS")
+                                if show_final: # Chỉ hiện kqua Final nếu user chọn xem Final
+                                    if real in res['dan_final']: st.success(f"Final: WIN")
+                                    else: st.error("Final: MISS")
+                                else: st.info("Final: Ẩn")
+                                
                             with c_r3:
-                                if real in rr['hybrid']: st.success(f"Hybrid: WIN")
-                                else: st.error("Hybrid: MISS")
+                                if show_hybrid: # Chỉ hiện kqua Hybrid nếu user chọn xem Hybrid
+                                    if real in rr['hybrid']: st.success(f"Hybrid: WIN")
+                                    else: st.error("Hybrid: MISS")
+                                else: st.info("Hybrid: Ẩn")
 
             with tab2:
                 st.subheader("Backtest (Giao diện chuẩn)")
