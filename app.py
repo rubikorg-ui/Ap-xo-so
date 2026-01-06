@@ -3,6 +3,8 @@ import pandas as pd
 import re
 import datetime
 import time
+import json
+import os
 from datetime import timedelta
 from collections import Counter
 from functools import lru_cache
@@ -19,6 +21,8 @@ st.set_page_config(
 
 st.title("🛡️ Quang Handsome: V54 Full Stats")
 st.caption("🚀 Khôi phục WinRate & TBSL | Hybrid = Gốc 1 ∩ Gốc 2 | Logic V52 + UI V53")
+
+CONFIG_FILE = 'config.json'
 
 # --- CÁC CẤU HÌNH MẪU (PRESETS) ---
 SCORES_PRESETS = {
@@ -38,7 +42,6 @@ SCORES_PRESETS = {
         "LIMITS": {'l12': 82, 'l34': 76, 'l56': 70, 'mod': 88}
     },
     "Miền Nam (Experimental)": {
-        # Đã cập nhật theo ảnh yêu cầu (M0 -> M10)
         "STD": [60, 8, 9, 10, 10, 30, 70, 30, 30, 30, 30],
         "MOD": [0, 5, 10, 15, 30, 30, 50, 35, 25, 25, 40],
         "LIMITS": {'l12': 85, 'l34': 80, 'l56': 75, 'mod': 90}
@@ -105,7 +108,6 @@ def find_header_row(df_preview):
             return idx
     return 3
 
-# --- FIX: HÀM ĐỌC TÊN FILE CẢI TIẾN (ĐỂ ĐỌC ĐƯỢC 1.12.CSV) ---
 def extract_meta_from_filename(filename):
     clean_name = filename.upper().replace(".CSV", "").replace(".XLSX", "")
     clean_name = re.sub(r'\s*-\s*', '-', clean_name) 
@@ -127,7 +129,6 @@ def extract_meta_from_filename(filename):
             return m, y, datetime.date(y, m, d)
         except: pass
     
-    # Bắt ngày lẻ ở đuôi (VD: ...- 1.12 hoặc ...- 05)
     single_day_match = re.findall(r'(\d{1,2})$', clean_name)
     if single_day_match:
         try:
@@ -171,7 +172,6 @@ def load_data_v24(files):
                 file_status.append(f"✅ Excel: {file.name}")
             elif file.name.endswith('.csv'):
                 if not date_from_name: continue
-                # Thử nhiều encoding để fix lỗi
                 encodings_to_try = ['utf-8', 'latin-1', 'cp1252', 'utf-16']
                 df_raw = None
                 preview = None
@@ -499,6 +499,22 @@ def get_preset_params(preset_name):
     lim = p['LIMITS']
     return std, mod, lim
 
+# === XỬ LÝ LƯU CẤU HÌNH JSON ===
+def load_config():
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except: return None
+    return None
+
+def save_config(config_data):
+    try:
+        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(config_data, f, indent=4)
+        return True
+    except: return False
+
 # ==============================================================================
 # 3. GIAO DIỆN CHÍNH
 # ==============================================================================
@@ -506,37 +522,68 @@ def get_preset_params(preset_name):
 def main():
     uploaded_files = st.file_uploader("📂 Tải file CSV/Excel", type=['xlsx', 'csv'], accept_multiple_files=True)
 
+    # 1. LOAD CONFIG KHI KHỞI ĐỘNG
+    saved_cfg = load_config()
+    
+    # Logic khởi tạo session state
     if 'std_0' not in st.session_state:
-        def_vals = SCORES_PRESETS["Hard Core (Khuyên dùng)"]
-        for i in range(11):
-            st.session_state[f'std_{i}'] = def_vals["STD"][i]
-            st.session_state[f'mod_{i}'] = def_vals["MOD"][i]
-        
-        st.session_state['L12'] = def_vals['LIMITS']['l12']
-        st.session_state['L34'] = def_vals['LIMITS']['l34']
-        st.session_state['L56'] = def_vals['LIMITS']['l56']
-        st.session_state['LMOD'] = def_vals['LIMITS']['mod']
+        # Nếu có file save, ưu tiên load
+        if saved_cfg:
+            source = saved_cfg
+            st.session_state['preset_choice'] = "Cấu hình đã lưu (Saved)"
+        else:
+            source = SCORES_PRESETS["Hard Core (Khuyên dùng)"]
+            # Chuyển đổi format cấu hình mẫu sang format session
+            source_flat = {}
+            for i in range(11):
+                source_flat[f'std_{i}'] = source['STD'][i]
+                source_flat[f'mod_{i}'] = source['MOD'][i]
+            source_flat['L12'] = source['LIMITS']['l12']
+            source_flat['L34'] = source['LIMITS']['l34']
+            source_flat['L56'] = source['LIMITS']['l56']
+            source_flat['LMOD'] = source['LIMITS']['mod']
+            # Default params phụ
+            source_flat['MAX_TRIM'] = 65
+            source_flat['ROLLING_WINDOW'] = 10
+            source_flat['MIN_VOTES'] = 1
+            source_flat['USE_INVERSE'] = False
+            source = source_flat
+
+        # Gán vào session
+        for k, v in source.items():
+            if k in ['STD', 'MOD', 'LIMITS']: continue # Skip raw struct
+            st.session_state[k] = v
 
     with st.sidebar:
         st.header("⚙️ Cài đặt")
-        MAX_TRIM_NUMS = st.slider("🛡️ Phanh An Toàn (Max số):", 50, 90, 65, help="Chỉ áp dụng cho dàn Final.")
-        ROLLING_WINDOW = st.number_input("Chu kỳ xét (Ngày)", min_value=1, value=10)
+        
+        # Helper update từ preset menu
+        def update_scores():
+            choice = st.session_state.preset_choice
+            if choice == "Cấu hình đã lưu (Saved)":
+                cfg = load_config()
+                if cfg:
+                    for k, v in cfg.items(): st.session_state[k] = v
+            elif choice in SCORES_PRESETS:
+                vals = SCORES_PRESETS[choice]
+                for i in range(11):
+                    st.session_state[f'std_{i}'] = vals["STD"][i]
+                    st.session_state[f'mod_{i}'] = vals["MOD"][i]
+                if 'LIMITS' in vals:
+                    st.session_state['L12'] = vals['LIMITS']['l12']
+                    st.session_state['L34'] = vals['LIMITS']['l34']
+                    st.session_state['L56'] = vals['LIMITS']['l56']
+                    st.session_state['LMOD'] = vals['LIMITS']['mod']
+        
+        # Menu Preset (Thêm mục Saved)
+        menu_ops = ["Cấu hình đã lưu (Saved)"] + list(SCORES_PRESETS.keys()) if os.path.exists(CONFIG_FILE) else list(SCORES_PRESETS.keys())
+        st.selectbox("📚 Chọn bộ mẫu:", options=menu_ops, index=0 if os.path.exists(CONFIG_FILE) else 0, key="preset_choice", on_change=update_scores)
+
+        # Các inputs (Gắn key để auto sync với session)
+        MAX_TRIM_NUMS = st.slider("🛡️ Phanh An Toàn (Max số):", 50, 90, key="MAX_TRIM", help="Chỉ áp dụng cho dàn Final.")
+        ROLLING_WINDOW = st.number_input("Chu kỳ xét (Ngày)", min_value=1, key="ROLLING_WINDOW")
         
         with st.expander("🎚️ 1. Điểm & Auto Limit", expanded=True):
-            def update_scores():
-                choice = st.session_state.preset_choice
-                if choice in SCORES_PRESETS:
-                    vals = SCORES_PRESETS[choice]
-                    for i in range(11):
-                        st.session_state[f'std_{i}'] = vals["STD"][i]
-                        st.session_state[f'mod_{i}'] = vals["MOD"][i]
-                    if 'LIMITS' in vals:
-                        st.session_state['L12'] = vals['LIMITS']['l12']
-                        st.session_state['L34'] = vals['LIMITS']['l34']
-                        st.session_state['L56'] = vals['LIMITS']['l56']
-                        st.session_state['LMOD'] = vals['LIMITS']['mod']
-                        
-            st.selectbox("📚 Chọn bộ mẫu:", options=["Tùy chỉnh"] + list(SCORES_PRESETS.keys()), index=0, key="preset_choice", on_change=update_scores)
             c_s1, c_s2 = st.columns(2)
             with c_s1:
                 st.write("**GỐC**")
@@ -547,10 +594,10 @@ def main():
 
         st.markdown("---")
         with st.expander("✂️ Chi tiết cắt Top (Auto)", expanded=True):
-            L_TOP_12 = st.number_input("Top 1 & 2 lấy:", value=82, step=1, key="L12")
-            L_TOP_34 = st.number_input("Top 3 & 4 lấy:", value=76, step=1, key="L34")
-            L_TOP_56 = st.number_input("Top 5 & 6 lấy:", value=70, step=1, key="L56")
-            LIMIT_MODIFIED = st.number_input("Top 1 Modified lấy:", value=88, step=1, key="LMOD")
+            L_TOP_12 = st.number_input("Top 1 & 2 lấy:", step=1, key="L12")
+            L_TOP_34 = st.number_input("Top 3 & 4 lấy:", step=1, key="L34")
+            L_TOP_56 = st.number_input("Top 5 & 6 lấy:", step=1, key="L56")
+            LIMIT_MODIFIED = st.number_input("Top 1 Modified lấy:", step=1, key="LMOD")
 
         st.markdown("---")
         with st.expander("👁️ Hiển thị (Dự Đoán)", expanded=True):
@@ -562,8 +609,30 @@ def main():
                 show_final = st.checkbox("Hiện Final (Current)", value=True)
                 show_hybrid = st.checkbox("Hiện HYBRID (VIP)", value=True)
 
-        MIN_VOTES = st.number_input("Vote tối thiểu:", min_value=1, max_value=10, value=1)
-        USE_INVERSE = st.checkbox("Chấm Điểm Đảo (Ngược)", value=False)
+        MIN_VOTES = st.number_input("Vote tối thiểu:", min_value=1, max_value=10, key="MIN_VOTES")
+        USE_INVERSE = st.checkbox("Chấm Điểm Đảo (Ngược)", key="USE_INVERSE")
+        
+        # NÚT SAVE CONFIG
+        if st.button("💾 LƯU CẤU HÌNH", type="secondary", use_container_width=True):
+            # Gom toàn bộ session state quan trọng
+            save_data = {}
+            for i in range(11):
+                save_data[f'std_{i}'] = st.session_state[f'std_{i}']
+                save_data[f'mod_{i}'] = st.session_state[f'mod_{i}']
+            save_data.update({
+                'L12': st.session_state['L12'],
+                'L34': st.session_state['L34'],
+                'L56': st.session_state['L56'],
+                'LMOD': st.session_state['LMOD'],
+                'MAX_TRIM': st.session_state['MAX_TRIM'],
+                'ROLLING_WINDOW': st.session_state['ROLLING_WINDOW'],
+                'MIN_VOTES': st.session_state['MIN_VOTES'],
+                'USE_INVERSE': st.session_state['USE_INVERSE']
+            })
+            if save_config(save_data):
+                st.success("Đã lưu vào 'config.json'!")
+                time.sleep(1)
+                st.rerun()
         
         if st.button("🗑️ XÓA CACHE", type="primary"):
             st.cache_data.clear(); st.rerun()
@@ -575,7 +644,9 @@ def main():
             for e in err_logs: st.error(e)
         
         if data_cache:
-            current_limit_cfg = {'l12': L_TOP_12, 'l34': L_TOP_34, 'l56': L_TOP_56, 'mod': LIMIT_MODIFIED}
+            # === QUAN TRỌNG: GOM LIMITS TỪ GIAO DIỆN ===
+            user_defined_limits = {'l12': L_TOP_12, 'l34': L_TOP_34, 'l56': L_TOP_56, 'mod': LIMIT_MODIFIED}
+            
             last_d = max(data_cache.keys())
             
             tab1, tab2, tab3 = st.tabs(["📊 DỰ ĐOÁN", "🔙 BACKTEST", "🔍 MATRIX"])
@@ -590,17 +661,17 @@ def main():
                         # 1. Luồng hiện tại
                         curr_std = {f'M{i}': st.session_state[f'std_{i}'] for i in range(11)}
                         curr_mod = {f'M{i}': st.session_state[f'mod_{i}'] for i in range(11)}
-                        res_curr, err_curr = calculate_v24_final(target, ROLLING_WINDOW, data_cache, kq_db, current_limit_cfg, MIN_VOTES, curr_std, curr_mod, USE_INVERSE, None, max_trim=MAX_TRIM_NUMS)
+                        res_curr, err_curr = calculate_v24_final(target, ROLLING_WINDOW, data_cache, kq_db, user_defined_limits, MIN_VOTES, curr_std, curr_mod, USE_INVERSE, None, max_trim=MAX_TRIM_NUMS)
                         
-                        # 2. CH1
-                        ch1_std, ch1_mod, ch1_lim = get_preset_params("CH1: Bám Đuôi (An Toàn)")
-                        res_ch1, _ = calculate_v24_final(target, ROLLING_WINDOW, data_cache, kq_db, ch1_lim, MIN_VOTES, ch1_std, ch1_mod, USE_INVERSE, None, max_trim=MAX_TRIM_NUMS)
+                        # 2. CH1 (Dùng user limits)
+                        ch1_std, ch1_mod, _ = get_preset_params("CH1: Bám Đuôi (An Toàn)") 
+                        res_ch1, _ = calculate_v24_final(target, ROLLING_WINDOW, data_cache, kq_db, user_defined_limits, MIN_VOTES, ch1_std, ch1_mod, USE_INVERSE, None, max_trim=MAX_TRIM_NUMS)
 
-                        # 3. Hard Core
-                        hc_std, hc_mod, hc_lim = get_preset_params("Hard Core (Khuyên dùng)")
-                        res_hc, _ = calculate_v24_final(target, ROLLING_WINDOW, data_cache, kq_db, hc_lim, MIN_VOTES, hc_std, hc_mod, USE_INVERSE, None, max_trim=MAX_TRIM_NUMS)
+                        # 3. Hard Core (Dùng user limits)
+                        hc_std, hc_mod, _ = get_preset_params("Hard Core (Khuyên dùng)")
+                        res_hc, _ = calculate_v24_final(target, ROLLING_WINDOW, data_cache, kq_db, user_defined_limits, MIN_VOTES, hc_std, hc_mod, USE_INVERSE, None, max_trim=MAX_TRIM_NUMS)
 
-                        # Logic Hybrid Mới: Gốc CH1 giao Gốc HC
+                        # Hybrid
                         hybrid_goc = []
                         if res_ch1 and res_hc:
                             hybrid_goc = sorted(list(set(res_ch1['dan_goc']).intersection(set(res_hc['dan_goc']))))
@@ -660,6 +731,7 @@ def main():
                 with c_date1: d_start = st.date_input("Từ ngày:", value=last_d - timedelta(days=7))
                 with c_date2: d_end = st.date_input("Đến ngày:", value=last_d)
                 
+                # --- FIX: LOGIC ĐỂ TRÁNH BẢNG NHẢY ---
                 if st.button("▶️ CHẠY BACKTEST", type="primary"):
                     if d_start > d_end: st.error("Ngày bắt đầu > Ngày kết thúc")
                     else:
@@ -668,8 +740,8 @@ def main():
                         bar = st.progress(0)
                         
                         # Chuẩn bị Params
-                        ch1_std, ch1_mod, ch1_lim = get_preset_params("CH1: Bám Đuôi (An Toàn)")
-                        hc_std, hc_mod, hc_lim = get_preset_params("Hard Core (Khuyên dùng)")
+                        ch1_std, ch1_mod, _ = get_preset_params("CH1: Bám Đuôi (An Toàn)")
+                        hc_std, hc_mod, _ = get_preset_params("Hard Core (Khuyên dùng)")
                         
                         for idx, d in enumerate(dates_range):
                             bar.progress((idx + 1) / len(dates_range))
@@ -683,8 +755,8 @@ def main():
                                 return f"{icon} ({len(arr)})"
 
                             if view_mode == "Hybrid (Giao Gốc 1 & 2)":
-                                r1 = calculate_v24_logic_only(d, ROLLING_WINDOW, data_cache, kq_db, ch1_lim, MIN_VOTES, ch1_std, ch1_mod, USE_INVERSE, None, max_trim=MAX_TRIM_NUMS)
-                                r2 = calculate_v24_logic_only(d, ROLLING_WINDOW, data_cache, kq_db, hc_lim, MIN_VOTES, hc_std, hc_mod, USE_INVERSE, None, max_trim=MAX_TRIM_NUMS)
+                                r1 = calculate_v24_logic_only(d, ROLLING_WINDOW, data_cache, kq_db, user_defined_limits, MIN_VOTES, ch1_std, ch1_mod, USE_INVERSE, None, max_trim=MAX_TRIM_NUMS)
+                                r2 = calculate_v24_logic_only(d, ROLLING_WINDOW, data_cache, kq_db, user_defined_limits, MIN_VOTES, hc_std, hc_mod, USE_INVERSE, None, max_trim=MAX_TRIM_NUMS)
                                 if r1 and r2:
                                     g1 = r1['dan_goc']; g2 = r2['dan_goc']
                                     hb = sorted(list(set(g1).intersection(set(g2))))
@@ -696,10 +768,10 @@ def main():
 
                             else:
                                 if "CH1" in view_mode:
-                                    res = calculate_v24_logic_only(d, ROLLING_WINDOW, data_cache, kq_db, ch1_lim, MIN_VOTES, ch1_std, ch1_mod, USE_INVERSE, None, max_trim=MAX_TRIM_NUMS)
+                                    res = calculate_v24_logic_only(d, ROLLING_WINDOW, data_cache, kq_db, user_defined_limits, MIN_VOTES, ch1_std, ch1_mod, USE_INVERSE, None, max_trim=MAX_TRIM_NUMS)
                                     suffix = "CH1"
                                 else:
-                                    res = calculate_v24_logic_only(d, ROLLING_WINDOW, data_cache, kq_db, hc_lim, MIN_VOTES, hc_std, hc_mod, USE_INVERSE, None, max_trim=MAX_TRIM_NUMS)
+                                    res = calculate_v24_logic_only(d, ROLLING_WINDOW, data_cache, kq_db, user_defined_limits, MIN_VOTES, hc_std, hc_mod, USE_INVERSE, None, max_trim=MAX_TRIM_NUMS)
                                     suffix = "HC"
                                 
                                 if res:
@@ -711,29 +783,31 @@ def main():
                         bar.empty()
                         if logs:
                             df_log = pd.DataFrame(logs)
-                            
-                            # --- TÍNH TOÁN STATS (Winrate & TBSL) ---
-                            st.markdown("### 📊 Thống Kê Tổng Hợp")
-                            
-                            cols_to_calc = df_log.columns[2:] # Bỏ Ngày, KQ
-                            st_cols = st.columns(len(cols_to_calc))
-                            
-                            for i, col_name in enumerate(cols_to_calc):
-                                series = df_log[col_name].astype(str)
-                                # Đếm số Win
-                                wins = series.apply(lambda x: 1 if "WIN" in x else 0).sum()
-                                # Lấy số lượng từ chuỗi (...)
-                                nums = series.apply(lambda x: int(re.search(r'\((\d+)\)', x).group(1)) if re.search(r'\((\d+)\)', x) else 0)
-                                avg_len = nums.mean()
-                                
-                                with st_cols[i]:
-                                    st.metric(
-                                        label=col_name,
-                                        value=f"{wins}/{len(df_log)} ({(wins/len(df_log))*100:.1f}%)",
-                                        delta=f"TBSL: {avg_len:.1f} số"
-                                    )
-                                    
-                            st.dataframe(df_log, use_container_width=True)
+                            # Lưu vào session state để tránh mất khi scroll
+                            st.session_state['backtest_result'] = df_log
+                
+                # Hiển thị từ Session State
+                if 'backtest_result' in st.session_state:
+                    df_log = st.session_state['backtest_result']
+                    
+                    st.markdown("### 📊 Thống Kê Tổng Hợp")
+                    cols_to_calc = df_log.columns[2:] 
+                    st_cols = st.columns(len(cols_to_calc))
+                    
+                    for i, col_name in enumerate(cols_to_calc):
+                        series = df_log[col_name].astype(str)
+                        wins = series.apply(lambda x: 1 if "WIN" in x else 0).sum()
+                        nums = series.apply(lambda x: int(re.search(r'\((\d+)\)', x).group(1)) if re.search(r'\((\d+)\)', x) else 0)
+                        avg_len = nums.mean()
+                        
+                        with st_cols[i]:
+                            st.metric(
+                                label=col_name,
+                                value=f"{wins}/{len(df_log)} ({(wins/len(df_log))*100:.1f}%)",
+                                delta=f"TBSL: {avg_len:.1f} số"
+                            )
+                    # Set height cố định để fix lỗi nhảy lung tung
+                    st.dataframe(df_log, use_container_width=True, height=600)
 
             with tab3:
                 st.subheader("Phân Tích Matrix")
