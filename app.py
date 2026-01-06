@@ -38,10 +38,9 @@ SCORES_PRESETS = {
         "LIMITS": {'l12': 82, 'l34': 76, 'l56': 70, 'mod': 88}
     },
     "Miền Nam (Experimental)": {
-        # Điểm: Rải đều để bắt cầu ngắn (M0-M2 có điểm)
-        "STD": [10, 15, 20, 25, 30, 35, 40, 50, 30, 20, 10],
-        "MOD": [10, 15, 20, 25, 30, 35, 40, 50, 30, 20, 10],
-        # Limits: Tăng lên để lấy nhiều số hơn (An toàn cho đài ảo)
+        # Đã cập nhật theo ảnh yêu cầu (M0 -> M10)
+        "STD": [60, 8, 9, 10, 10, 30, 70, 30, 30, 30, 30],
+        "MOD": [0, 5, 10, 15, 30, 30, 50, 35, 25, 25, 40],
         "LIMITS": {'l12': 85, 'l34': 80, 'l56': 75, 'mod': 90}
     }
 }
