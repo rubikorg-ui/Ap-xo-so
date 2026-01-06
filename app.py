@@ -8,17 +8,37 @@ from collections import Counter
 from functools import lru_cache
 
 # ==============================================================================
-# 1. CẤU HÌNH HỆ THỐNG
+# 1. CẤU HÌNH HỆ THỐNG & HARD CORE PRESETS
 # ==============================================================================
 st.set_page_config(
-    page_title="Quang Pro V42 - Stable Core", 
+    page_title="Quang Pro V46 - Hard Core", 
     page_icon="🛡️", 
     layout="wide",
     initial_sidebar_state="collapsed" 
 )
 
-st.title("🛡️ Quang Handsome: V42 Stable Core")
-st.caption("🚀 Hunter E-Class | Auto-Sync Params | Chiến thuật Overlap Boost")
+st.title("🛡️ Quang Handsome: V46 Hard Core")
+st.caption("🚀 Smart Trim System | Hard Core Config (T10-T12) | Logic Gốc 100%")
+
+# --- CẤU HÌNH HARD CORE (Đã kiểm chứng T10, T11, T12) ---
+# Nguyên tắc: STD nuôi đuôi (M8-M10), MOD nuôi giữa (M5-M7)
+SCORES_PRESETS = {
+    "Hard Core (Khuyên dùng)": {
+        "STD": [0, 0, 5, 10, 15, 25, 30, 35, 40, 50, 60], 
+        "MOD": [0, 5, 10, 20, 25, 45, 50, 40, 30, 25, 40]
+    },
+    "Gốc (V24 Standard)": {
+        "STD": [0, 1, 2, 3, 4, 5, 6, 7, 15, 25, 50],
+        "MOD": [0, 5, 10, 15, 30, 30, 50, 35, 25, 25, 40]
+    },
+    "Miền Nam (Theo Ảnh)": {
+        "STD": [50, 8, 9, 10, 10, 30, 40, 30, 25, 30, 30],
+        "MOD": [0, 5, 10, 15, 30, 30, 50, 35, 25, 25, 40]
+    }
+}
+
+# Limit Hard Core (Lưới rộng để bắt giao thoa)
+HARD_CORE_LIMITS = {'l12': 82, 'l34': 76, 'l56': 70, 'mod': 88}
 
 # Regex & Sets
 RE_NUMS = re.compile(r'\d+')
@@ -28,7 +48,7 @@ RE_SLASH_DATE = re.compile(r'(\d{1,2})[\.\-/](\d{1,2})')
 BAD_KEYWORDS = frozenset(['N', 'NGHI', 'SX', 'XIT', 'MISS', 'TRUOT', 'NGHỈ', 'LỖI'])
 
 # ==============================================================================
-# 2. CORE FUNCTIONS (XỬ LÝ DỮ LIỆU)
+# 2. CORE FUNCTIONS (GIỮ NGUYÊN 100% LOGIC GỐC)
 # ==============================================================================
 
 @lru_cache(maxsize=10000)
@@ -222,7 +242,7 @@ def fast_get_top_nums(df, p_map_dict, s_map_dict, top_n, min_v, inverse):
 
     return stats['Num'].head(top_n).tolist()
 
-def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits_config, min_votes, score_std, score_mod, use_inverse, manual_groups=None):
+def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits_config, min_votes, score_std, score_mod, use_inverse, manual_groups=None, max_trim=None):
     if target_date not in _cache: return None
     curr_data = _cache[target_date]
     df = curr_data['df']
@@ -288,6 +308,7 @@ def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits
                 if mems.empty:
                     stats_std[g]['ranks'].append(999); continue
                 
+                # Logic gốc vẫn giữ nguyên để tính win/loss của nhóm
                 top80_std = fast_get_top_nums(mems, d_p_map, d_s_map, 80, min_votes, use_inverse)
                 if kq in top80_std:
                     stats_std[g]['wins'] += 1
@@ -346,7 +367,28 @@ def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits
         mask_mod = hist_series == best_mod_grp.upper()
         final_modified = sorted(fast_get_top_nums(df[mask_mod], s_map_dict, p_map_dict, limits_config['mod'], min_votes, use_inverse))
 
-    final_intersect = sorted(list(set(final_original).intersection(set(final_modified))))
+    intersect_list = list(set(final_original).intersection(set(final_modified)))
+
+    # --- SMART TRIM (HẬU XỬ LÝ - KHÔNG ẢNH HƯỞNG LOGIC GỐC) ---
+    # Chỉ cắt bớt nếu số lượng vượt quá max_trim, dựa trên điểm số thực tế
+    if max_trim and len(intersect_list) > max_trim:
+        temp_df = df.copy()
+        melted = temp_df.melt(value_name='Val').dropna(subset=['Val'])
+        mask_bad = ~melted['Val'].astype(str).str.upper().str.contains(r'N|NGHI|SX|XIT', regex=True)
+        melted = melted[mask_bad]
+        s_nums = melted['Val'].astype(str).str.findall(r'\d+')
+        exploded = melted.assign(Num=s_nums).explode('Num')
+        exploded = exploded.dropna(subset=['Num'])
+        exploded['Num'] = exploded['Num'].str.strip().str.zfill(2)
+        exploded = exploded[exploded['Num'].isin(intersect_list)]
+        
+        exploded['Score'] = exploded['variable'].map(p_map_dict).fillna(0) + exploded['variable'].map(s_map_dict).fillna(0)
+        
+        final_scores = exploded.groupby('Num')['Score'].sum().reset_index()
+        final_scores = final_scores.sort_values(by='Score', ascending=False)
+        final_intersect = sorted(final_scores.head(max_trim)['Num'].tolist())
+    else:
+        final_intersect = sorted(intersect_list)
     
     return {
         "top6_std": top6_std, 
@@ -358,8 +400,8 @@ def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits
     }
 
 @st.cache_data(show_spinner=False)
-def calculate_v24_final(target_date, rolling_window, _cache, _kq_db, limits_config, min_votes, score_std, score_mod, use_inverse, manual_groups=None):
-    res = calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits_config, min_votes, score_std, score_mod, use_inverse, manual_groups)
+def calculate_v24_final(target_date, rolling_window, _cache, _kq_db, limits_config, min_votes, score_std, score_mod, use_inverse, manual_groups=None, max_trim=None):
+    res = calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits_config, min_votes, score_std, score_mod, use_inverse, manual_groups, max_trim)
     if not res: return None, "Lỗi dữ liệu"
     return res, None
 
@@ -429,186 +471,30 @@ def analyze_group_performance(start_date, end_date, cut_limit, score_map, _cache
     return df_rep, pd.DataFrame(detailed_rows)
 
 # ==============================================================================
-# 3. AUTO-HUNTER V2 (E-CLASS OVERLAP BOOST)
+# 3. GIAO DIỆN CHÍNH
 # ==============================================================================
-
-def analyze_column_ranks(target_date, lookback, _cache, _kq_db):
-    past_dates = []
-    check_d = target_date - timedelta(days=1)
-    while len(past_dates) < lookback:
-        if check_d in _cache and check_d in _kq_db: past_dates.append(check_d)
-        check_d -= timedelta(days=1)
-        if (target_date - check_d).days > 60: break
-    col_hits = Counter()
-    if not past_dates: return []
-    for d in past_dates:
-        df = _cache[d]['df']
-        kq = _kq_db[d]
-        for col in df.columns:
-            clean_name = str(col).upper().replace(" ", "")
-            if re.match(r'^M\d+$', clean_name):
-                all_vals = " ".join(df[col].astype(str).tolist())
-                if kq in get_nums(all_vals): col_hits[clean_name] += 1
-    return col_hits.most_common()
-
-def smart_hunter_v2(target_date, _cache, _kq_db, min_v, use_inv, max_allowed_nums, progress_bar=None, status_text=None):
-    """
-    Chiến thuật E-Class Hunter:
-    1. Quét Điểm (Score Tuning): Dùng limit tiêu chuẩn để tìm bộ điểm tốt nhất.
-    2. Quét Limit (Limit Tuning): Dùng bộ điểm tốt nhất để tìm bộ limit tốt nhất.
-    """
-    
-    # --- GIAI ĐOẠN 1: TÌM BỘ ĐIỂM (Trend Analysis) ---
-    if status_text: status_text.text("🤖 GĐ1: Phân tích xu hướng cột...")
-    ranked = analyze_column_ranks(target_date, 15, _cache, _kq_db)
-    
-    # Tạo các kịch bản Điểm
-    scenarios_score = []
-    
-    # S1: Trend (Bám Top 2)
-    s1 = {f"M{i}": 0 for i in range(11)}
-    if len(ranked) >= 2:
-        s1[ranked[0][0]] = 60
-        s1[ranked[1][0]] = 40
-    scenarios_score.append(("Trend (Top 2)", s1))
-    
-    # S2: Balance (Top 5)
-    s2 = {f"M{i}": 0 for i in range(11)}
-    weights = [50, 40, 30, 20, 10]
-    for idx, (col, _) in enumerate(ranked[:5]):
-        if idx < len(weights): s2[col] = weights[idx]
-    scenarios_score.append(("Balance (Top 5)", s2))
-
-    # S3: Default (Safe)
-    s_def = {f"M{i}": 0 for i in range(11)}; s_def["M10"] = 50; s_def["M9"] = 30
-    scenarios_score.append(("Safe (Default)", s_def))
-
-    # Limit tiêu chuẩn để test điểm
-    std_limit_cfg = {'l12': 80, 'l34': 65, 'l56': 60, 'mod': 86}
-    
-    # Lấy ngày test (5 ngày gần nhất cho vòng loại điểm)
-    test_dates_short = []
-    check = target_date - timedelta(days=1)
-    while len(test_dates_short) < 5:
-        if check in _kq_db: test_dates_short.append(check)
-        check -= timedelta(days=1)
-        if (target_date - check).days > 30: break
-    
-    best_score_set = None
-    best_score_win = -1
-    
-    if status_text: status_text.text("🤖 GĐ2: Tìm bộ điểm tối ưu...")
-    
-    # Chạy vòng loại điểm
-    for name, score_set in scenarios_score:
-        wins = 0
-        for d in test_dates_short:
-            res = calculate_v24_logic_only(d, 3, _cache, _kq_db, std_limit_cfg, min_v, score_set, score_set, use_inv, None)
-            if res and _kq_db[d] in res['dan_final']: wins += 1
-        if wins > best_score_win:
-            best_score_win = wins
-            best_score_set = score_set
-
-    # --- GIAI ĐOẠN 2: TINH CHỈNH LIMIT (Limit Tuning) ---
-    if status_text: status_text.text("🤖 GĐ3: Tối ưu bộ lọc cắt (Limit)...")
-    
-    # Tạo các kịch bản Limit
-    scenarios_limit = [
-        ("Siết Chặt (Tight)", {'l12': 75, 'l34': 60, 'l56': 55, 'mod': 80}),
-        ("Tiêu Chuẩn (Std)", {'l12': 80, 'l34': 65, 'l56': 60, 'mod': 86}),
-        ("Nới Lỏng (Loose)", {'l12': 85, 'l34': 70, 'l56': 65, 'mod': 88})
-    ]
-    
-    # Lấy ngày test dài hơn (10 ngày) để chốt cấu hình
-    test_dates_long = []
-    check = target_date - timedelta(days=1)
-    while len(test_dates_long) < 10:
-        if check in _kq_db: test_dates_long.append(check)
-        check -= timedelta(days=1)
-    
-    final_results = []
-    total_steps = len(scenarios_limit)
-    
-    for idx, (l_name, l_cfg) in enumerate(scenarios_limit):
-        if progress_bar: progress_bar.progress((idx + 1) / total_steps)
-        wins = 0
-        total_nums = 0
-        valid = 0
-        
-        for d in test_dates_long:
-            res = calculate_v24_logic_only(d, 3, _cache, _kq_db, l_cfg, min_v, best_score_set, best_score_set, use_inv, None)
-            if res:
-                t = res['dan_final']
-                if _kq_db[d] in t: wins += 1
-                total_nums += len(t)
-                valid += 1
-        
-        if valid > 0:
-            avg = total_nums / valid
-            wr = (wins / valid) * 100
-            # Chỉ lấy nếu số lượng đạt yêu cầu
-            if avg <= max_allowed_nums + 5: # Cho phép du di 5 số
-                final_results.append({
-                    "Name": f"{l_name} + Optimized Score",
-                    "WinRate": wr,
-                    "AvgNums": avg,
-                    "Scores": best_score_set,
-                    "Limits": l_cfg
-                })
-
-    if status_text: status_text.text("✅ Hoàn tất săn cấu hình!")
-    final_results.sort(key=lambda x: (-x['WinRate'], x['AvgNums']))
-    return final_results
-
-# ==============================================================================
-# 4. GIAO DIỆN CHÍNH
-# ==============================================================================
-
-# Callback cập nhật TOÀN BỘ CẤU HÌNH (Đồng bộ)
-def apply_hunter_callback_v2(scores, limits):
-    # 1. Update Scores
-    for k, v in scores.items():
-        key_suffix = k[1:] 
-        st.session_state[f'std_{key_suffix}'] = v
-        st.session_state[f'mod_{key_suffix}'] = v
-    
-    # 2. Update Limits (Gán vào Session State để UI tự nhảy)
-    st.session_state['L12'] = limits['l12']
-    st.session_state['L34'] = limits['l34']
-    st.session_state['L56'] = limits['l56']
-    st.session_state['LMOD'] = limits['mod']
-    
-    st.session_state['applied_success'] = True
-
-SCORES_PRESETS = {
-    "Gốc (V24 Standard)": {
-        "STD": [0, 1, 2, 3, 4, 5, 6, 7, 15, 25, 50],
-        "MOD": [0, 5, 10, 15, 30, 30, 50, 35, 25, 25, 40]
-    },
-    "Miền Nam (Theo Ảnh)": {
-        "STD": [50, 8, 9, 10, 10, 30, 40, 30, 25, 30, 30],
-        "MOD": [0, 5, 10, 15, 30, 30, 50, 35, 25, 25, 40]
-    }
-}
 
 def main():
     uploaded_files = st.file_uploader("📂 Tải file CSV/Excel", type=['xlsx', 'csv'], accept_multiple_files=True)
 
     # Init Default Scores
     if 'std_0' not in st.session_state:
-        def_vals = SCORES_PRESETS["Gốc (V24 Standard)"]
+        def_vals = SCORES_PRESETS["Hard Core (Khuyên dùng)"]
         for i in range(11):
             st.session_state[f'std_{i}'] = def_vals["STD"][i]
             st.session_state[f'mod_{i}'] = def_vals["MOD"][i]
 
-    # Init Default Limits (Nếu chưa có)
-    if 'L12' not in st.session_state: st.session_state['L12'] = 80
-    if 'L34' not in st.session_state: st.session_state['L34'] = 65
-    if 'L56' not in st.session_state: st.session_state['L56'] = 60
-    if 'LMOD' not in st.session_state: st.session_state['LMOD'] = 86
+    # Init Default Limits (Dùng Hard Core mặc định)
+    if 'L12' not in st.session_state: st.session_state['L12'] = HARD_CORE_LIMITS['l12']
+    if 'L34' not in st.session_state: st.session_state['L34'] = HARD_CORE_LIMITS['l34']
+    if 'L56' not in st.session_state: st.session_state['L56'] = HARD_CORE_LIMITS['l56']
+    if 'LMOD' not in st.session_state: st.session_state['LMOD'] = HARD_CORE_LIMITS['mod']
 
     with st.sidebar:
         st.header("⚙️ Cài đặt")
+        # Thêm nút Phanh An Toàn
+        MAX_TRIM_NUMS = st.slider("🛡️ Phanh An Toàn (Max số):", 50, 90, 65, help="Dù Top lấy rộng đến đâu, dàn cuối sẽ tự động cắt về con số này.")
+        
         ROLLING_WINDOW = st.number_input("Chu kỳ xét (Ngày)", min_value=1, value=10)
         with st.expander("🎚️ 1. Điểm M0-M10 (Cấu hình)", expanded=False):
             def update_scores():
@@ -618,7 +504,7 @@ def main():
                     for i in range(11):
                         st.session_state[f'std_{i}'] = vals["STD"][i]
                         st.session_state[f'mod_{i}'] = vals["MOD"][i]
-            st.selectbox("📚 Chọn bộ mẫu:", options=["Tùy chỉnh"] + list(SCORES_PRESETS.keys()), index=1, key="preset_choice", on_change=update_scores)
+            st.selectbox("📚 Chọn bộ mẫu:", options=["Tùy chỉnh"] + list(SCORES_PRESETS.keys()), index=0, key="preset_choice", on_change=update_scores)
             c_s1, c_s2 = st.columns(2)
             with c_s1:
                 st.write("**GỐC**")
@@ -631,8 +517,7 @@ def main():
         st.header("⚖️ Lọc & Cắt")
         MIN_VOTES = st.number_input("Vote tối thiểu:", min_value=1, max_value=10, value=1)
         USE_INVERSE = st.checkbox("Chấm Điểm Đảo (Ngược)", value=False)
-        with st.expander("✂️ Chi tiết cắt Top (Auto Sync)", expanded=True):
-            # Dùng key session_state để Hunter có thể ghi đè
+        with st.expander("✂️ Chi tiết cắt Top", expanded=True):
             L_TOP_12 = st.number_input("Top 1 & 2 lấy:", key="L12")
             L_TOP_34 = st.number_input("Top 3 & 4 lấy:", key="L34")
             L_TOP_56 = st.number_input("Top 5 & 6 lấy:", key="L56")
@@ -656,17 +541,12 @@ def main():
             for s in f_status: st.success(s)
             for e in err_logs: st.error(e)
         
-        # Check success flag
-        if st.session_state.get('applied_success'):
-            st.toast("✅ Đã đồng bộ cấu hình (Điểm + Limit)!", icon="🎯")
-            st.session_state['applied_success'] = False
-
         if data_cache:
-            # Lấy limit từ biến (đã được bind session_state)
             limit_cfg = {'l12': L_TOP_12, 'l34': L_TOP_34, 'l56': L_TOP_56, 'mod': LIMIT_MODIFIED}
             last_d = max(data_cache.keys())
             
-            tab1, tab2, tab3, tab4 = st.tabs(["📊 DỰ ĐOÁN", "🔙 BACKTEST", "🔍 MATRIX", "🏹 SĂN KỊCH BẢN"])
+            # Đã cắt bỏ Tab Hunter theo yêu cầu
+            tab1, tab2, tab3 = st.tabs(["📊 DỰ ĐOÁN", "🔙 BACKTEST", "🔍 MATRIX"])
             
             with tab1:
                 st.subheader("Dự đoán thủ công (3 Bảng)")
@@ -677,7 +557,8 @@ def main():
                     with st.spinner("Đang tính toán..."):
                         custom_std = {f'M{i}': st.session_state[f'std_{i}'] for i in range(11)}
                         custom_mod = {f'M{i}': st.session_state[f'mod_{i}'] for i in range(11)}
-                        res, err = calculate_v24_final(target, ROLLING_WINDOW, data_cache, kq_db, limit_cfg, MIN_VOTES, custom_std, custom_mod, USE_INVERSE, None)
+                        # Truyền MAX_TRIM_NUMS vào đây
+                        res, err = calculate_v24_final(target, ROLLING_WINDOW, data_cache, kq_db, limit_cfg, MIN_VOTES, custom_std, custom_mod, USE_INVERSE, None, max_trim=MAX_TRIM_NUMS)
                         st.session_state['run_result'] = {'res': res, 'err': err, 'target': target}
 
                 if 'run_result' in st.session_state and st.session_state['run_result']['target'] == target:
@@ -721,7 +602,8 @@ def main():
                         for idx, d in enumerate(dates_range):
                             bar.progress((idx + 1) / len(dates_range))
                             if d not in kq_db: continue
-                            res = calculate_v24_logic_only(d, ROLLING_WINDOW, data_cache, kq_db, limit_cfg, MIN_VOTES, custom_std, custom_mod, USE_INVERSE, None)
+                            # Truyền max_trim vào backtest để kết quả chính xác
+                            res = calculate_v24_logic_only(d, ROLLING_WINDOW, data_cache, kq_db, limit_cfg, MIN_VOTES, custom_std, custom_mod, USE_INVERSE, None, max_trim=MAX_TRIM_NUMS)
                             if res:
                                 t = res['dan_final']
                                 status = "WIN" if kq_db[d] in t else "MISS"
@@ -749,54 +631,6 @@ def main():
                         df_report, df_detail = analyze_group_performance(d_range_a[0], d_range_a[1], cut_val, s_map_vals, data_cache, kq_db, MIN_VOTES, USE_INVERSE)
                         st.dataframe(df_report, use_container_width=True)
                         st.dataframe(df_detail, use_container_width=True)
-
-            with tab4:
-                st.subheader("🏹 Săn Kịch Bản (Hunter E-Class)")
-                st.info("AI sẽ tối ưu 2 bước: 1. Tìm Bộ Điểm tốt nhất -> 2. Tìm Mức Cắt (Limit) tốt nhất.")
-                
-                c1, c2 = st.columns([1, 2])
-                with c1:
-                    target_hunter = st.date_input("Ngày:", value=last_d, key="t_hunter")
-                    max_nums_hunter = st.slider("Max Số Lượng mong muốn:", 40, 90, 75, key="mx_hunter")
-                    
-                    if st.button("🏹 BẮT ĐẦU SĂN", type="primary"):
-                        st.toast("🚀 Hunter E-Class kích hoạt!", icon="🔥") 
-                        prog_bar = st.progress(0)
-                        status_txt = st.empty()
-                        
-                        best_scenarios = smart_hunter_v2(
-                            target_hunter, data_cache, kq_db, 
-                            MIN_VOTES, USE_INVERSE, max_nums_hunter, 
-                            progress_bar=prog_bar, status_text=status_txt
-                        )
-                        prog_bar.empty()
-                        status_txt.empty()
-                        st.session_state['best_scenarios'] = best_scenarios
-                
-                with c2:
-                    if 'best_scenarios' in st.session_state:
-                        scenarios = st.session_state['best_scenarios']
-                        if not scenarios:
-                            st.warning("⚠️ Không tìm thấy cấu hình thỏa mãn điều kiện số lượng.")
-                        else:
-                            st.success(f"🎉 Tìm thấy {len(scenarios)} cấu hình E-Class!")
-                            for idx, sc in enumerate(scenarios):
-                                with st.expander(f"🏅 #{idx+1}: {sc['Name']} | Win {sc['WinRate']:.0f}% | {sc['AvgNums']:.1f} số", expanded=(idx==0)):
-                                    col_info1, col_info2 = st.columns(2)
-                                    with col_info1:
-                                        st.caption("Cấu hình cắt (Limits):")
-                                        st.json(sc['Limits'])
-                                    with col_info2:
-                                        st.caption("Bộ điểm (Scores):")
-                                        st.json(sc['Scores'])
-                                    
-                                    # Nút áp dụng đồng bộ
-                                    st.button(
-                                        f"👉 Áp dụng toàn bộ #{idx+1}", 
-                                        key=f"apply_{idx}", 
-                                        on_click=apply_hunter_callback_v2, 
-                                        args=(sc['Scores'], sc['Limits'])
-                                    )
 
 if __name__ == "__main__":
     main()
