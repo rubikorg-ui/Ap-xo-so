@@ -22,13 +22,13 @@ st.caption("🚀 Khôi phục CH1 | Backtest Chi Tiết | Smart Trim | Fix KeyEr
 
 # --- CÁC CẤU HÌNH MẪU (PRESETS) ---
 SCORES_PRESETS = {
-    "Hard Core (Khuyên dùng)": { # Đã sửa tên Key cho khớp với hàm Main
-        "STD": [0, 0, 5, 10, 15, 25, 30, 35, 40, 50, 60], # Nuôi đuôi mạnh
-        "MOD": [0, 5, 10, 20, 25, 45, 50, 40, 30, 25, 40]  # Nuôi giữa
+    "Hard Core (Khuyên dùng)": { 
+        "STD": [0, 0, 5, 10, 15, 25, 30, 35, 40, 50, 60], 
+        "MOD": [0, 5, 10, 20, 25, 45, 50, 40, 30, 25, 40]  
     },
-    "CH1: Bám Đuôi An Toàn": { # Đã khôi phục
-        "STD": [0, 0, 5, 10, 20, 30, 40, 50, 50, 50, 50], # Rải đều nhóm cuối
-        "MOD": [0, 5, 10, 20, 30, 40, 50, 40, 30, 20, 30] # Cân bằng
+    "CH1: Bám Đuôi (An Toàn)": { # Đã cập nhật theo ảnh (Dòng 642-645)
+        "STD": [10, 20, 30, 30, 30, 30, 40, 40, 50, 50, 70], 
+        "MOD": [10, 20, 30, 30, 30, 30, 40, 40, 50, 50, 70] 
     },
     "Gốc (V24 Standard)": {
         "STD": [0, 1, 2, 3, 4, 5, 6, 7, 15, 25, 50],
