@@ -11,14 +11,14 @@ from functools import lru_cache
 # 1. CẤU HÌNH HỆ THỐNG & PRESETS
 # ==============================================================================
 st.set_page_config(
-    page_title="Quang Pro V53 - UI Restore", 
+    page_title="Quang Pro V54 - Full Stats", 
     page_icon="🛡️", 
     layout="wide",
     initial_sidebar_state="collapsed" 
 )
 
-st.title("🛡️ Quang Handsome: V53 UI Restore")
-st.caption("🚀 Khôi phục tùy chọn Hiển thị | Hybrid = Gốc 1 ∩ Gốc 2 | Backtest Mode")
+st.title("🛡️ Quang Handsome: V54 Full Stats")
+st.caption("🚀 Khôi phục WinRate & TBSL | Hybrid = Gốc 1 ∩ Gốc 2 | Logic V52 + UI V53")
 
 # --- CÁC CẤU HÌNH MẪU (PRESETS) ---
 SCORES_PRESETS = {
@@ -544,7 +544,6 @@ def main():
             LIMIT_MODIFIED = st.number_input("Top 1 Modified lấy:", value=88, step=1, key="LMOD")
 
         st.markdown("---")
-        # --- PHẦN KHÔI PHỤC TÙY CHỌN HIỂN THỊ ---
         with st.expander("👁️ Hiển thị (Dự Đoán)", expanded=True):
             c_v1, c_v2 = st.columns(2)
             with c_v1:
@@ -608,7 +607,6 @@ def main():
                     if not rr['err']:
                         st.info(f"Phân nhóm nguồn: {res['source_col']}")
                         
-                        # --- XỬ LÝ HIỂN THỊ THEO CHECKBOX ---
                         cols_to_show = []
                         if show_goc: 
                             cols_to_show.append({"t": f"Gốc ({len(res['dan_goc'])})", "d": res['dan_goc'], "k": "Goc"})
@@ -633,13 +631,13 @@ def main():
                             with c_r1: st.metric("KQ", real)
                             
                             with c_r2:
-                                if show_final: # Chỉ hiện kqua Final nếu user chọn xem Final
+                                if show_final: 
                                     if real in res['dan_final']: st.success(f"Final: WIN")
                                     else: st.error("Final: MISS")
                                 else: st.info("Final: Ẩn")
                                 
                             with c_r3:
-                                if show_hybrid: # Chỉ hiện kqua Hybrid nếu user chọn xem Hybrid
+                                if show_hybrid: 
                                     if real in rr['hybrid']: st.success(f"Hybrid: WIN")
                                     else: st.error("Hybrid: MISS")
                                 else: st.info("Hybrid: Ẩn")
@@ -647,7 +645,6 @@ def main():
             with tab2:
                 st.subheader("Backtest (Giao diện chuẩn)")
                 
-                # --- KHU VỰC ĐIỀU KHIỂN ---
                 c_mode, c_date1, c_date2 = st.columns([2, 1, 1])
                 with c_mode:
                     view_mode = st.radio("Chọn chế độ xem:", ["CH1 (Bám Đuôi)", "Hard Core", "Hybrid (Giao Gốc 1 & 2)"], horizontal=True)
@@ -672,18 +669,16 @@ def main():
 
                             row_data = {"Ngày": d.strftime("%d/%m"), "KQ": real_kq}
 
+                            def fmt(kq, arr): 
+                                icon = "✅ WIN" if kq in arr else "❌ MISS"
+                                return f"{icon} ({len(arr)})"
+
                             if view_mode == "Hybrid (Giao Gốc 1 & 2)":
-                                # Chạy cả 2 để lấy giao Gốc
                                 r1 = calculate_v24_logic_only(d, ROLLING_WINDOW, data_cache, kq_db, ch1_lim, MIN_VOTES, ch1_std, ch1_mod, USE_INVERSE, None, max_trim=MAX_TRIM_NUMS)
                                 r2 = calculate_v24_logic_only(d, ROLLING_WINDOW, data_cache, kq_db, hc_lim, MIN_VOTES, hc_std, hc_mod, USE_INVERSE, None, max_trim=MAX_TRIM_NUMS)
                                 if r1 and r2:
                                     g1 = r1['dan_goc']; g2 = r2['dan_goc']
                                     hb = sorted(list(set(g1).intersection(set(g2))))
-                                    
-                                    # Helper format
-                                    def fmt(kq, arr): 
-                                        icon = "✅ WIN" if kq in arr else "❌ MISS"
-                                        return f"{icon} ({len(arr)})"
                                     
                                     row_data["Gốc 1 (CH1)"] = fmt(real_kq, g1)
                                     row_data["Gốc 2 (HC)"] = fmt(real_kq, g2)
@@ -691,7 +686,6 @@ def main():
                                     logs.append(row_data)
 
                             else:
-                                # Chạy đơn lẻ
                                 if "CH1" in view_mode:
                                     res = calculate_v24_logic_only(d, ROLLING_WINDOW, data_cache, kq_db, ch1_lim, MIN_VOTES, ch1_std, ch1_mod, USE_INVERSE, None, max_trim=MAX_TRIM_NUMS)
                                     suffix = "CH1"
@@ -700,10 +694,6 @@ def main():
                                     suffix = "HC"
                                 
                                 if res:
-                                    def fmt(kq, arr): 
-                                        icon = "✅ WIN" if kq in arr else "❌ MISS"
-                                        return f"{icon} ({len(arr)})"
-                                        
                                     row_data[f"Gốc {suffix}"] = fmt(real_kq, res['dan_goc'])
                                     row_data[f"Mod {suffix}"] = fmt(real_kq, res['dan_mod'])
                                     row_data[f"Final {suffix}"] = fmt(real_kq, res['dan_final'])
@@ -712,6 +702,28 @@ def main():
                         bar.empty()
                         if logs:
                             df_log = pd.DataFrame(logs)
+                            
+                            # --- TÍNH TOÁN STATS (Winrate & TBSL) ---
+                            st.markdown("### 📊 Thống Kê Tổng Hợp")
+                            
+                            cols_to_calc = df_log.columns[2:] # Bỏ Ngày, KQ
+                            st_cols = st.columns(len(cols_to_calc))
+                            
+                            for i, col_name in enumerate(cols_to_calc):
+                                series = df_log[col_name].astype(str)
+                                # Đếm số Win
+                                wins = series.apply(lambda x: 1 if "WIN" in x else 0).sum()
+                                # Lấy số lượng từ chuỗi (...)
+                                nums = series.apply(lambda x: int(re.search(r'\((\d+)\)', x).group(1)) if re.search(r'\((\d+)\)', x) else 0)
+                                avg_len = nums.mean()
+                                
+                                with st_cols[i]:
+                                    st.metric(
+                                        label=col_name,
+                                        value=f"{wins}/{len(df_log)} ({(wins/len(df_log))*100:.1f}%)",
+                                        delta=f"TBSL: {avg_len:.1f} số"
+                                    )
+                                    
                             st.dataframe(df_log, use_container_width=True)
 
             with tab3:
@@ -733,3 +745,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
