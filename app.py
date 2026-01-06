@@ -8,25 +8,25 @@ from collections import Counter
 from functools import lru_cache
 
 # ==============================================================================
-# 1. CẤU HÌNH HỆ THỐNG & PRESETS (ĐÃ KHÔI PHỤC CH1)
+# 1. CẤU HÌNH HỆ THỐNG & PRESETS
 # ==============================================================================
 st.set_page_config(
-    page_title="Quang Pro V47 - Full Restore", 
+    page_title="Quang Pro V47 - Final Fix", 
     page_icon="🛡️", 
     layout="wide",
     initial_sidebar_state="collapsed" 
 )
 
-st.title("🛡️ Quang Handsome: V47 Full Restore")
-st.caption("🚀 Khôi phục CH1 | Backtest Chi Tiết | Smart Trim | Fix TypeError")
+st.title("🛡️ Quang Handsome: V47 Final Fix")
+st.caption("🚀 Khôi phục CH1 | Backtest Chi Tiết | Smart Trim | Fix KeyError")
 
 # --- CÁC CẤU HÌNH MẪU (PRESETS) ---
 SCORES_PRESETS = {
-    "Hard Core (Tối ưu T12)": {
+    "Hard Core (Khuyên dùng)": { # Đã sửa tên Key cho khớp với hàm Main
         "STD": [0, 0, 5, 10, 15, 25, 30, 35, 40, 50, 60], # Nuôi đuôi mạnh
         "MOD": [0, 5, 10, 20, 25, 45, 50, 40, 30, 25, 40]  # Nuôi giữa
     },
-    "CH1: Bám Đuôi An Toàn": { # Đã khôi phục theo yêu cầu
+    "CH1: Bám Đuôi An Toàn": { # Đã khôi phục
         "STD": [0, 0, 5, 10, 20, 30, 40, 50, 50, 50, 50], # Rải đều nhóm cuối
         "MOD": [0, 5, 10, 20, 30, 40, 50, 40, 30, 20, 30] # Cân bằng
     },
@@ -318,7 +318,7 @@ def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits
                     stats_std[g]['ranks'].append(top80_std.index(kq) + 1)
                 else: stats_std[g]['ranks'].append(999)
                 
-                # FIX: ép kiểu int cho limits_config['mod']
+                # FIX: ép kiểu int
                 top86_mod = fast_get_top_nums(mems, d_s_map, d_p_map, int(limits_config['mod']), min_votes, use_inverse)
                 if kq in top86_mod: stats_mod[g]['wins'] += 1
 
@@ -342,7 +342,7 @@ def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits
             mask = hist_series == g.upper()
             valid_mems = df[mask]
             lim = limit_dict.get(g, limit_dict.get('default', 80))
-            # FIX: ép kiểu int cho lim
+            # FIX: ép kiểu int
             res = fast_get_top_nums(valid_mems, p_map, s_map, int(lim), min_votes, use_inverse)
             pool.extend(res)
         return pool
@@ -370,7 +370,7 @@ def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits
         
         final_original = sorted(list(s1.intersection(s2)))
         mask_mod = hist_series == best_mod_grp.upper()
-        # FIX: ép kiểu int cho limits_config['mod']
+        # FIX: ép kiểu int
         final_modified = sorted(fast_get_top_nums(df[mask_mod], s_map_dict, p_map_dict, int(limits_config['mod']), min_votes, use_inverse))
 
     intersect_list = list(set(final_original).intersection(set(final_modified)))
@@ -391,7 +391,7 @@ def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits
         
         final_scores = exploded.groupby('Num')['Score'].sum().reset_index()
         final_scores = final_scores.sort_values(by='Score', ascending=False)
-        # FIX: ép kiểu int cho max_trim
+        # FIX: ép kiểu int
         final_intersect = sorted(final_scores.head(int(max_trim))['Num'].tolist()) 
     else:
         final_intersect = sorted(intersect_list)
@@ -486,6 +486,7 @@ def main():
 
     # Init Default Scores
     if 'std_0' not in st.session_state:
+        # Sử dụng đúng tên Key cho khớp
         def_vals = SCORES_PRESETS["Hard Core (Khuyên dùng)"]
         for i in range(11):
             st.session_state[f'std_{i}'] = def_vals["STD"][i]
@@ -553,6 +554,7 @@ def main():
             limit_cfg = {'l12': L_TOP_12, 'l34': L_TOP_34, 'l56': L_TOP_56, 'mod': LIMIT_MODIFIED}
             last_d = max(data_cache.keys())
             
+            # Khôi phục tab Hunter cũ, thêm tab Backtest chi tiết
             tab1, tab2, tab3 = st.tabs(["📊 DỰ ĐOÁN", "🔙 BACKTEST", "🔍 MATRIX"])
             
             with tab1:
@@ -611,7 +613,6 @@ def main():
                             res = calculate_v24_logic_only(d, ROLLING_WINDOW, data_cache, kq_db, limit_cfg, MIN_VOTES, custom_std, custom_mod, USE_INVERSE, None, max_trim=MAX_TRIM_NUMS)
                             if res:
                                 real_kq = kq_db[d]
-                                # Thêm logic backtest từng phần
                                 stt_goc = "✅" if real_kq in res['dan_goc'] else "❌"
                                 stt_mod = "✅" if real_kq in res['dan_mod'] else "❌"
                                 stt_final = "WIN" if real_kq in res['dan_final'] else "MISS"
