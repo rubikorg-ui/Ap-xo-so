@@ -8,24 +8,27 @@ from collections import Counter
 from functools import lru_cache
 
 # ==============================================================================
-# 1. CẤU HÌNH HỆ THỐNG & HARD CORE PRESETS
+# 1. CẤU HÌNH HỆ THỐNG & PRESETS (ĐÃ KHÔI PHỤC CH1)
 # ==============================================================================
 st.set_page_config(
-    page_title="Quang Pro V46 - Hard Core", 
+    page_title="Quang Pro V47 - Full Restore", 
     page_icon="🛡️", 
     layout="wide",
     initial_sidebar_state="collapsed" 
 )
 
-st.title("🛡️ Quang Handsome: V46 Hard Core")
-st.caption("🚀 Smart Trim System | Hard Core Config (T10-T12) | Logic Gốc 100%")
+st.title("🛡️ Quang Handsome: V47 Full Restore")
+st.caption("🚀 Khôi phục CH1 | Backtest Chi Tiết | Smart Trim | Fix TypeError")
 
-# --- CẤU HÌNH HARD CORE (Đã kiểm chứng T10, T11, T12) ---
-# Nguyên tắc: STD nuôi đuôi (M8-M10), MOD nuôi giữa (M5-M7)
+# --- CÁC CẤU HÌNH MẪU (PRESETS) ---
 SCORES_PRESETS = {
-    "Hard Core (Khuyên dùng)": {
-        "STD": [0, 0, 5, 10, 15, 25, 30, 35, 40, 50, 60], 
-        "MOD": [0, 5, 10, 20, 25, 45, 50, 40, 30, 25, 40]
+    "Hard Core (Tối ưu T12)": {
+        "STD": [0, 0, 5, 10, 15, 25, 30, 35, 40, 50, 60], # Nuôi đuôi mạnh
+        "MOD": [0, 5, 10, 20, 25, 45, 50, 40, 30, 25, 40]  # Nuôi giữa
+    },
+    "CH1: Bám Đuôi An Toàn": { # Đã khôi phục theo yêu cầu
+        "STD": [0, 0, 5, 10, 20, 30, 40, 50, 50, 50, 50], # Rải đều nhóm cuối
+        "MOD": [0, 5, 10, 20, 30, 40, 50, 40, 30, 20, 30] # Cân bằng
     },
     "Gốc (V24 Standard)": {
         "STD": [0, 1, 2, 3, 4, 5, 6, 7, 15, 25, 50],
@@ -240,7 +243,8 @@ def fast_get_top_nums(df, p_map_dict, s_map_dict, top_n, min_v, inverse):
     else:
         stats = stats.sort_values(by=['P', 'V', 'Num_Int'], ascending=[False, False, True])
 
-    return stats['Num'].head(top_n).tolist()
+    # FIX TYPEERROR: Ép kiểu top_n về int
+    return stats['Num'].head(int(top_n)).tolist()
 
 def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits_config, min_votes, score_std, score_mod, use_inverse, manual_groups=None, max_trim=None):
     if target_date not in _cache: return None
@@ -308,14 +312,14 @@ def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits
                 if mems.empty:
                     stats_std[g]['ranks'].append(999); continue
                 
-                # Logic gốc vẫn giữ nguyên để tính win/loss của nhóm
                 top80_std = fast_get_top_nums(mems, d_p_map, d_s_map, 80, min_votes, use_inverse)
                 if kq in top80_std:
                     stats_std[g]['wins'] += 1
                     stats_std[g]['ranks'].append(top80_std.index(kq) + 1)
                 else: stats_std[g]['ranks'].append(999)
                 
-                top86_mod = fast_get_top_nums(mems, d_s_map, d_p_map, limits_config['mod'], min_votes, use_inverse)
+                # FIX: ép kiểu int cho limits_config['mod']
+                top86_mod = fast_get_top_nums(mems, d_s_map, d_p_map, int(limits_config['mod']), min_votes, use_inverse)
                 if kq in top86_mod: stats_mod[g]['wins'] += 1
 
     top6_std = []
@@ -338,7 +342,8 @@ def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits
             mask = hist_series == g.upper()
             valid_mems = df[mask]
             lim = limit_dict.get(g, limit_dict.get('default', 80))
-            res = fast_get_top_nums(valid_mems, p_map, s_map, lim, min_votes, use_inverse)
+            # FIX: ép kiểu int cho lim
+            res = fast_get_top_nums(valid_mems, p_map, s_map, int(lim), min_votes, use_inverse)
             pool.extend(res)
         return pool
 
@@ -365,12 +370,12 @@ def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits
         
         final_original = sorted(list(s1.intersection(s2)))
         mask_mod = hist_series == best_mod_grp.upper()
-        final_modified = sorted(fast_get_top_nums(df[mask_mod], s_map_dict, p_map_dict, limits_config['mod'], min_votes, use_inverse))
+        # FIX: ép kiểu int cho limits_config['mod']
+        final_modified = sorted(fast_get_top_nums(df[mask_mod], s_map_dict, p_map_dict, int(limits_config['mod']), min_votes, use_inverse))
 
     intersect_list = list(set(final_original).intersection(set(final_modified)))
 
-    # --- SMART TRIM (HẬU XỬ LÝ - KHÔNG ẢNH HƯỞNG LOGIC GỐC) ---
-    # Chỉ cắt bớt nếu số lượng vượt quá max_trim, dựa trên điểm số thực tế
+    # --- SMART TRIM ---
     if max_trim and len(intersect_list) > max_trim:
         temp_df = df.copy()
         melted = temp_df.melt(value_name='Val').dropna(subset=['Val'])
@@ -386,7 +391,8 @@ def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits
         
         final_scores = exploded.groupby('Num')['Score'].sum().reset_index()
         final_scores = final_scores.sort_values(by='Score', ascending=False)
-        final_intersect = sorted(final_scores.head(max_trim)['Num'].tolist())
+        # FIX: ép kiểu int cho max_trim
+        final_intersect = sorted(final_scores.head(int(max_trim))['Num'].tolist()) 
     else:
         final_intersect = sorted(intersect_list)
     
@@ -434,7 +440,8 @@ def analyze_group_performance(start_date, end_date, cut_limit, score_map, _cache
         for g in grp_stats:
             mask = hist_series == g.upper()
             valid_mems = df[mask]
-            top_list = fast_get_top_nums(valid_mems, d_p_map, d_p_map, cut_limit, min_v, inverse)
+            # FIX: ép kiểu int
+            top_list = fast_get_top_nums(valid_mems, d_p_map, d_p_map, int(cut_limit), min_v, inverse)
             top_set = set(top_list)
             grp_stats[g]['last_pred'] = sorted(top_list)
             if kq in top_set:
@@ -518,10 +525,11 @@ def main():
         MIN_VOTES = st.number_input("Vote tối thiểu:", min_value=1, max_value=10, value=1)
         USE_INVERSE = st.checkbox("Chấm Điểm Đảo (Ngược)", value=False)
         with st.expander("✂️ Chi tiết cắt Top", expanded=True):
-            L_TOP_12 = st.number_input("Top 1 & 2 lấy:", key="L12")
-            L_TOP_34 = st.number_input("Top 3 & 4 lấy:", key="L34")
-            L_TOP_56 = st.number_input("Top 5 & 6 lấy:", key="L56")
-            LIMIT_MODIFIED = st.number_input("Top 1 Modified lấy:", key="LMOD")
+            # FIX TYPEERROR: Ép kiểu step=1
+            L_TOP_12 = st.number_input("Top 1 & 2 lấy:", value=82, step=1, key="L12")
+            L_TOP_34 = st.number_input("Top 3 & 4 lấy:", value=76, step=1, key="L34")
+            L_TOP_56 = st.number_input("Top 5 & 6 lấy:", value=70, step=1, key="L56")
+            LIMIT_MODIFIED = st.number_input("Top 1 Modified lấy:", value=88, step=1, key="LMOD")
 
         st.markdown("---")
         with st.expander("👁️ Hiển thị (Dự Đoán)", expanded=True):
@@ -545,7 +553,6 @@ def main():
             limit_cfg = {'l12': L_TOP_12, 'l34': L_TOP_34, 'l56': L_TOP_56, 'mod': LIMIT_MODIFIED}
             last_d = max(data_cache.keys())
             
-            # Đã cắt bỏ Tab Hunter theo yêu cầu
             tab1, tab2, tab3 = st.tabs(["📊 DỰ ĐOÁN", "🔙 BACKTEST", "🔍 MATRIX"])
             
             with tab1:
@@ -557,7 +564,6 @@ def main():
                     with st.spinner("Đang tính toán..."):
                         custom_std = {f'M{i}': st.session_state[f'std_{i}'] for i in range(11)}
                         custom_mod = {f'M{i}': st.session_state[f'mod_{i}'] for i in range(11)}
-                        # Truyền MAX_TRIM_NUMS vào đây
                         res, err = calculate_v24_final(target, ROLLING_WINDOW, data_cache, kq_db, limit_cfg, MIN_VOTES, custom_std, custom_mod, USE_INVERSE, None, max_trim=MAX_TRIM_NUMS)
                         st.session_state['run_result'] = {'res': res, 'err': err, 'target': target}
 
@@ -586,12 +592,12 @@ def main():
                             else: st.error(f"MISS {real}")
 
             with tab2:
-                st.subheader("Backtest (Đã khôi phục)")
+                st.subheader("Backtest (Gốc - Mod - Final)")
                 c_b1, c_b2 = st.columns(2)
                 with c_b1: d_start = st.date_input("Từ ngày:", value=last_d - timedelta(days=7))
                 with c_b2: d_end = st.date_input("Đến ngày:", value=last_d)
                 
-                if st.button("Chạy Backtest (Final 1)"):
+                if st.button("Chạy Backtest (Chi tiết)"):
                     custom_std = {f'M{i}': st.session_state[f'std_{i}'] for i in range(11)}
                     custom_mod = {f'M{i}': st.session_state[f'mod_{i}'] for i in range(11)}
                     if d_start > d_end: st.error("Ngày bắt đầu phải nhỏ hơn ngày kết thúc!")
@@ -602,17 +608,27 @@ def main():
                         for idx, d in enumerate(dates_range):
                             bar.progress((idx + 1) / len(dates_range))
                             if d not in kq_db: continue
-                            # Truyền max_trim vào backtest để kết quả chính xác
                             res = calculate_v24_logic_only(d, ROLLING_WINDOW, data_cache, kq_db, limit_cfg, MIN_VOTES, custom_std, custom_mod, USE_INVERSE, None, max_trim=MAX_TRIM_NUMS)
                             if res:
-                                t = res['dan_final']
-                                status = "WIN" if kq_db[d] in t else "MISS"
-                                logs.append({"Ngày": d.strftime("%d/%m"), "KQ": kq_db[d], "TT": status, "Số lượng": len(t)})
+                                real_kq = kq_db[d]
+                                # Thêm logic backtest từng phần
+                                stt_goc = "✅" if real_kq in res['dan_goc'] else "❌"
+                                stt_mod = "✅" if real_kq in res['dan_mod'] else "❌"
+                                stt_final = "WIN" if real_kq in res['dan_final'] else "MISS"
+                                
+                                logs.append({
+                                    "Ngày": d.strftime("%d/%m"), 
+                                    "KQ": real_kq, 
+                                    "Gốc": stt_goc,
+                                    "Mod": stt_mod,
+                                    "Final": stt_final, 
+                                    "SL": len(res['dan_final'])
+                                })
                         bar.empty()
                         if logs:
                             df_log = pd.DataFrame(logs)
-                            wins = df_log[df_log["TT"]=="WIN"].shape[0]
-                            st.metric("WinRate (Final 1)", f"{wins}/{len(df_log)}", delta=f"{(wins/len(df_log))*100:.1f}%")
+                            wins = df_log[df_log["Final"]=="WIN"].shape[0]
+                            st.metric("WinRate (Final)", f"{wins}/{len(df_log)}", delta=f"{(wins/len(df_log))*100:.1f}%")
                             st.dataframe(df_log, use_container_width=True)
 
             with tab3:
