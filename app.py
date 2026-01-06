@@ -727,7 +727,11 @@ def main():
                 
                 c_mode, c_date1, c_date2 = st.columns([2, 1, 1])
                 with c_mode:
-                    view_mode = st.radio("Chọn chế độ xem:", ["CH1 (Bám Đuôi)", "Hard Core", "Hybrid (Giao Gốc 1 & 2)"], horizontal=True)
+                    view_mode = st.radio(
+                        "Chọn chế độ xem:", 
+                        ["Cấu hình hiện tại (Current Config)", "CH1 (Bám Đuôi)", "Hard Core", "Hybrid (Giao Gốc 1 & 2)"], 
+                        horizontal=True
+                    )
                 with c_date1: d_start = st.date_input("Từ ngày:", value=last_d - timedelta(days=7))
                 with c_date2: d_end = st.date_input("Đến ngày:", value=last_d)
                 
@@ -739,7 +743,7 @@ def main():
                         logs = []
                         bar = st.progress(0)
                         
-                        # Chuẩn bị Params
+                        # Chuẩn bị Params Mặc định
                         ch1_std, ch1_mod, _ = get_preset_params("CH1: Bám Đuôi (An Toàn)")
                         hc_std, hc_mod, _ = get_preset_params("Hard Core (Khuyên dùng)")
                         
@@ -764,6 +768,18 @@ def main():
                                     row_data["Gốc 1 (CH1)"] = fmt(real_kq, g1)
                                     row_data["Gốc 2 (HC)"] = fmt(real_kq, g2)
                                     row_data["Hybrid"] = fmt(real_kq, hb)
+                                    logs.append(row_data)
+                            
+                            elif view_mode == "Cấu hình hiện tại (Current Config)":
+                                # Lấy điểm từ Session State (Màn hình đang nhập)
+                                curr_std = {f'M{i}': st.session_state[f'std_{i}'] for i in range(11)}
+                                curr_mod = {f'M{i}': st.session_state[f'mod_{i}'] for i in range(11)}
+                                res = calculate_v24_logic_only(d, ROLLING_WINDOW, data_cache, kq_db, user_defined_limits, MIN_VOTES, curr_std, curr_mod, USE_INVERSE, None, max_trim=MAX_TRIM_NUMS)
+                                
+                                if res:
+                                    row_data["Gốc Current"] = fmt(real_kq, res['dan_goc'])
+                                    row_data["Mod Current"] = fmt(real_kq, res['dan_mod'])
+                                    row_data["Final Current"] = fmt(real_kq, res['dan_final'])
                                     logs.append(row_data)
 
                             else:
