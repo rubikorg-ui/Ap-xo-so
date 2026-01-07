@@ -95,7 +95,6 @@ def parse_date_smart(col_str, f_m, f_y):
         d, m = int(match_slash.group(1)), int(match_slash.group(2))
         if m < 1 or m > 12 or d < 1 or d > 31: return None
         curr_y = f_y
-        # Logic chuyển giao năm cũ vẫn giữ nguyên
         if m == 12 and f_m == 1: curr_y -= 1
         elif m == 1 and f_m == 12: curr_y += 1
         try: return datetime.date(curr_y, m, d)
@@ -126,6 +125,7 @@ def extract_meta_from_filename(filename):
             return m_global, y_global, datetime.date(y_global, m_global, d)
         except: pass
     return m_global, y_global, None
+
 # ==============================================================================
 # 2.1. ADVANCED DATA LOADING (FIXED)
 # ==============================================================================
@@ -133,13 +133,12 @@ def extract_meta_from_filename(filename):
 def find_header_row(df_preview):
     """Tìm dòng tiêu đề thông minh hơn dựa trên từ khóa"""
     keywords = ["STT", "MEMBER", "THÀNH VIÊN", "TV TOP", "DANH SÁCH", "HỌ VÀ TÊN", "NICK", "M1", "M 1", "M 1 0", "M10"]
-    # Quét 30 dòng đầu (tăng phạm vi)
     for idx, row in df_preview.head(30).iterrows():
         row_str = str(row.values).upper()
         count = sum(1 for k in keywords if k in row_str)
-        if count >= 1: # Chỉ cần thấy 1 từ khóa quan trọng là chốt
+        if count >= 1:
             return idx
-    return 0 # Mặc định về 0 nếu không tìm thấy
+    return 0
 
 @st.cache_data(ttl=600, show_spinner=False)
 def load_data_v24(files):
@@ -156,7 +155,6 @@ def load_data_v24(files):
         try:
             dfs_to_process = []
             
-            # --- XỬ LÝ EXCEL ---
             if file.name.endswith('.xlsx'):
                 xls = pd.ExcelFile(file, engine='openpyxl')
                 for sheet in xls.sheet_names:
@@ -178,10 +176,8 @@ def load_data_v24(files):
                         dfs_to_process.append((s_date, df))
                 file_status.append(f"✅ Excel: {file.name}")
 
-            # --- XỬ LÝ CSV (FIXED) ---
             elif file.name.endswith('.csv'):
                 if not date_from_name: continue
-                # Thêm utf-8-sig để xử lý BOM tiếng Việt
                 encodings_to_try = ['utf-8-sig', 'utf-8', 'latin-1', 'cp1252', 'utf-16']
                 df_raw = None
                 h_row = 0
@@ -200,10 +196,8 @@ def load_data_v24(files):
                     err_logs.append(f"❌ Lỗi Encoding: {file.name}")
                     continue
                 
-                # Cắt lấy phần dữ liệu
                 df = df_raw.iloc[h_row+1:].copy()
                 
-                # Xử lý TRÙNG TÊN CỘT (Critical)
                 raw_cols = df_raw.iloc[h_row].astype(str).tolist()
                 seen = {}
                 final_cols = []
@@ -217,7 +211,6 @@ def load_data_v24(files):
                         final_cols.append(c)
                 df.columns = final_cols
                 
-                # Kiểm tra sơ bộ cột M, nếu không có cột M nào -> có thể là file rác (BPĐ)
                 if not any(c.startswith('M') for c in final_cols):
                     err_logs.append(f"⚠️ Bỏ qua {file.name}: Không tìm thấy cột điểm M")
                     continue
@@ -225,34 +218,28 @@ def load_data_v24(files):
                 dfs_to_process.append((date_from_name, df))
                 file_status.append(f"✅ CSV: {file.name}")
 
-            # --- CLEANING CHUNG ---
             for t_date, df in dfs_to_process:
-                # Xóa ký tự BOM ẩn trong tên cột
                 df.columns = [str(c).strip().upper().replace('\ufeff', '') for c in df.columns]
                 
-                # Lấy cột điểm tổng (SCORE_SORT)
                 score_col = next((c for c in df.columns if 'Đ9' in c or 'DIEM' in c or 'ĐIỂM' in c), None)
                 if score_col:
                     df['SCORE_SORT'] = pd.to_numeric(df[score_col], errors='coerce').fillna(0)
                 else:
                     df['SCORE_SORT'] = 0
                 
-                # Chuẩn hóa tên cột M (Quan trọng)
                 rename_map = {}
                 for c in df.columns:
-                    clean_c = c.replace(" ", "") # Xóa khoảng trắng: M 1 -> M1
+                    clean_c = c.replace(" ", "")
                     if re.match(r'^M\d+$', clean_c) or clean_c == 'M10':
                         rename_map[c] = clean_c
                 if rename_map: df = df.rename(columns=rename_map)
 
-                # Map lịch sử kết quả
                 hist_map = {}
                 for col in df.columns:
                     if "UNNAMED" in col or col.startswith("M") or col in ["STT", "SCORE_SORT"]: continue
                     d_obj = parse_date_smart(col, f_m, f_y)
                     if d_obj: hist_map[d_obj] = col
                 
-                # Lấy KQ thật từ dòng chứa chữ KQ
                 kq_row = None
                 if not df.empty:
                     for c_idx in range(min(5, len(df.columns))):
@@ -420,7 +407,80 @@ def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits
         exploded = exploded[exploded['Num'].isin(intersect_list)]
         exploded['Score'] = exploded['variable'].map(p_map_dict).fillna(0) + exploded['variable'].map(s_map_dict).fillna(0)
         final_scores = exploded.groupby('Num')['Score'].sum().reset_index()
-        final_scores = final_
+        final_scores = final_scores.sort_values(by='Score', ascending=False)
+        final_intersect = sorted(final_scores.head(int(max_trim))['Num'].tolist()) 
+    else:
+        final_intersect = sorted(intersect_list)
+    return {
+        "top6_std": top6_std, "best_mod": best_mod_grp, "dan_goc": final_original, 
+        "dan_mod": final_modified, "dan_final": final_intersect, "source_col": col_hist_used
+    }
+
+@st.cache_data(show_spinner=False)
+def calculate_v24_final(target_date, rolling_window, _cache, _kq_db, limits_config, min_votes, score_std, score_mod, use_inverse, manual_groups=None, max_trim=None):
+    res = calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits_config, min_votes, score_std, score_mod, use_inverse, manual_groups, max_trim)
+    if not res: return None, "Lỗi dữ liệu"
+    return res, None
+
+# ==============================================================================
+# 2.2. QUANT MATRIX
+# ==============================================================================
+def get_elite_members(df, top_n=10, sort_by='score'):
+    if df.empty: return df
+    m_cols = [c for c in df.columns if c.startswith('M')]
+    df = df.dropna(subset=m_cols, how='all')
+    if sort_by == 'score':
+        return df.sort_values(by='SCORE_SORT', ascending=False).head(top_n)
+    else:
+        if 'STT' in df.columns:
+            return df.sort_values(by='STT', ascending=True).head(top_n)
+        return df.head(top_n)
+
+def calculate_matrix_simple(df_members, weights_list):
+    scores = np.zeros(100)
+    for _, row in df_members.iterrows():
+        for i in range(len(weights_list)):
+            col_name = f"M{i}"
+            if col_name in df_members.columns:
+                w = weights_list[i]
+                if w > 0:
+                    nums = get_nums(row[col_name])
+                    for n in nums:
+                        try:
+                            n_int = int(n)
+                            if 0 <= n_int <= 99: scores[n_int] += w
+                        except: pass
+    result = []
+    for i in range(100):
+        if scores[i] > 0: result.append((i, scores[i]))
+    result.sort(key=lambda x: x[1], reverse=True)
+    return result
+
+# ==============================================================================
+# CONFIG HELPER (ĐÃ DI CHUYỂN LÊN TRÊN MAIN)
+# ==============================================================================
+def get_preset_params(preset_name):
+    if preset_name not in SCORES_PRESETS: return None
+    p = SCORES_PRESETS[preset_name]
+    std = {f'M{i}': p['STD'][i] for i in range(11)}
+    mod = {f'M{i}': p['MOD'][i] for i in range(11)}
+    lim = p['LIMITS']
+    return std, mod, lim
+
+def load_config():
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, 'r', encoding='utf-8') as f: return json.load(f)
+        except: return None
+    return None
+
+def save_config(config_data):
+    try:
+        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(config_data, f, indent=4)
+        return True
+    except: return False
+
 # ==============================================================================
 # 3. GIAO DIỆN CHÍNH
 # ==============================================================================
