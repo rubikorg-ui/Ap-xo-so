@@ -822,4 +822,43 @@ def main():
 
                         bar.empty()
                         if logs:
-                            
+                            df_log = pd.DataFrame(logs)
+                            st.session_state['backtest_result'] = df_log
+                
+                if 'backtest_result' in st.session_state:
+                    df_log = st.session_state['backtest_result']
+                    st.markdown("### 📊 Thống Kê Tổng Hợp")
+                    cols_to_calc = df_log.columns[2:] 
+                    st_cols = st.columns(len(cols_to_calc))
+                    for i, col_name in enumerate(cols_to_calc):
+                        series = df_log[col_name].astype(str)
+                        wins = series.apply(lambda x: 1 if "WIN" in x else 0).sum()
+                        nums = series.apply(lambda x: int(re.search(r'\((\d+)\)', x).group(1)) if re.search(r'\((\d+)\)', x) else 0)
+                        avg_len = nums.mean()
+                        with st_cols[i]:
+                            st.metric(
+                                label=col_name,
+                                value=f"{wins}/{len(df_log)} ({(wins/len(df_log))*100:.1f}%)",
+                                delta=f"TBSL: {avg_len:.1f} số"
+                            )
+                    st.dataframe(df_log, use_container_width=True, height=600)
+
+            with tab3:
+                st.subheader("Phân Tích Matrix")
+                with st.expander("⚙️ Cấu hình", expanded=True):
+                    c_a1, c_a2 = st.columns(2)
+                    with c_a1: d_range_a = st.date_input("Thời gian:", [last_d - timedelta(days=15), last_d], key="dr_a")
+                    with c_a2: 
+                        cut_val = st.number_input("Cắt Top:", value=60, step=5, key="cut_mtx")
+                        score_mode = st.radio("Hệ điểm:", ["Gốc (Std)", "Modified"], horizontal=True)
+                    btn_scan = st.button("🔎 QUÉT MATRIX", use_container_width=True)
+                
+                if btn_scan:
+                    s_map_vals = {f'M{i}': st.session_state[f'std_{i}'] for i in range(11)} if score_mode == "Gốc (Std)" else {f'M{i}': st.session_state[f'mod_{i}'] for i in range(11)}
+                    with st.spinner("Đang xử lý..."):
+                        df_report, df_detail = analyze_group_performance(d_range_a[0], d_range_a[1], cut_val, s_map_vals, data_cache, kq_db, MIN_VOTES, USE_INVERSE)
+                        st.dataframe(df_report, use_container_width=True)
+                        st.dataframe(df_detail, use_container_width=True)
+
+if __name__ == "__main__":
+    main()
