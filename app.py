@@ -14,14 +14,14 @@ import numpy as np
 # 1. CẤU HÌNH HỆ THỐNG & PRESETS
 # ==============================================================================
 st.set_page_config(
-    page_title="Quang Pro V55 - Elite Hunter", 
+    page_title="Quang Pro V55.1 - Stable", 
     page_icon="🛡️", 
     layout="wide",
     initial_sidebar_state="collapsed" 
 )
 
-st.title("🛡️ Quang Handsome: V55 Elite Hunter")
-st.caption("🚀 Di Sản V54 + Chiến Thuật Ma Trận Định Lượng (M6-M9 & M10)")
+st.title("🛡️ Quang Handsome: V55 Elite Hunter (Stable)")
+st.caption("🚀 Fix lỗi hiển thị bảng | Di Sản V54 + Matrix Quant Hunter")
 
 CONFIG_FILE = 'config.json'
 
@@ -57,7 +57,7 @@ RE_SLASH_DATE = re.compile(r'(\d{1,2})[\.\-/](\d{1,2})')
 BAD_KEYWORDS = frozenset(['N', 'NGHI', 'SX', 'XIT', 'MISS', 'TRUOT', 'NGHỈ', 'LỖI'])
 
 # ==============================================================================
-# 2. CORE FUNCTIONS (LEGACY + NEW QUANT)
+# 2. CORE FUNCTIONS
 # ==============================================================================
 
 @lru_cache(maxsize=10000)
@@ -819,7 +819,8 @@ def main():
                                     value=f"{wins}/{len(df_log)} ({(wins/len(df_log))*100:.1f}%)",
                                     delta=f"TBSL: {avg_len:.1f} số"
                                 )
-                    st.dataframe(df_log, use_container_width=True, height=600)
+                    # FIX: Thêm key và hide_index để chống nhảy
+                    st.dataframe(df_log, use_container_width=True, height=600, hide_index=True, key="backtest_main_table")
 
             # ==========================================================
             # TAB 3: MATRIX CHIẾN LƯỢC (TỰ ĐỘNG HÓA)
