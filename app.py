@@ -134,19 +134,11 @@ def extract_meta_from_filename(filename):
 # ==============================================================================
 
 def find_header_row(df_preview):
-    """
-    [FIXED] Logic tìm dòng tiêu đề chuẩn như Code 1 (V54).
-    1. Bỏ qua từ khóa gây nhiễu (M1, M10).
-    2. Chỉ tìm STT, MEMBER...
-    3. Nếu không thấy -> Mặc định trả về 3 (Để bắt đúng cột G4 khi nhập dị).
-    """
     keywords = ["STT", "MEMBER", "THÀNH VIÊN", "TV TOP", "DANH SÁCH", "HỌ VÀ TÊN", "NICK"]
     for idx, row in df_preview.head(30).iterrows():
         row_str = str(row.values).upper()
-        # Chỉ cần chứa 1 từ khóa chuẩn là nhận
         if any(k in row_str for k in keywords):
             return idx
-    # QUAN TRỌNG: Trả về 3 nếu không tìm thấy (Giống Code 1)
     return 3
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -220,9 +212,8 @@ def load_data_v24(files):
                         final_cols.append(c)
                 df.columns = final_cols
                 
-                # Check cột M
+                # Fallback cột M
                 if not any(c.startswith('M') for c in final_cols):
-                    # Fallback nhẹ: nếu không thấy M, thử tìm lại header ở dòng 3 cứng
                     if h_row != 3:
                         h_row = 3
                         df = df_raw.iloc[h_row+1:].copy()
@@ -255,7 +246,7 @@ def load_data_v24(files):
                 
                 kq_row = None
                 if not df.empty:
-                    # [FIXED-1] Chỉ quét 2 cột đầu tìm KQ. ĐÃ XÓA |ĐB|ĐẶC BIỆT
+                    # [FIXED-1] Chỉ quét 2 cột đầu. CHỈ tìm "KQ/KẾT QUẢ". Bỏ "ĐB" để tránh bắt nhầm dòng 4.
                     for c_idx in range(min(2, len(df.columns))):
                         col_check = df.columns[c_idx]
                         try:
@@ -268,6 +259,7 @@ def load_data_v24(files):
                     for d_val, c_name in hist_map.items():
                         try:
                             nums = get_nums(str(kq_row[c_name]))
+                            # Giữ logic lấy số đầu tiên
                             if nums: kq_db[d_val] = nums[0]
                         except: pass
                         
@@ -836,7 +828,8 @@ def main():
                             avg_len = nums.mean()
                             with st_cols[i]:
                                 st.metric(col_name, f"{wins}/{len(df_log)} ({(wins/len(df_log))*100:.1f}%)", f"TB: {avg_len:.1f} số")
-                    st.data_editor(df_log, use_container_width=True, height=600, hide_index=True, disabled=True)
+                    # [FIXED-TAB2] Đổi data_editor -> dataframe để fix lỗi nhảy cuộn trên mobile
+                    st.dataframe(df_log, use_container_width=True, height=600, hide_index=True)
 
             # TAB 3: MATRIX
             with tab3:
@@ -866,12 +859,12 @@ def main():
                         cut_val = st.number_input("✂️ Lấy:", value=def_cut, step=5)
                         skip_val = st.number_input("🚫 Bỏ:", value=def_skip, step=5)
                         
-                        # [FIXED-3] Thêm Widget chọn ngày soi cho Tab Matrix
+                        # [FIXED-TAB3] Thêm Widget chọn ngày soi cho Tab Matrix
                         target_matrix_date = st.date_input("Chọn ngày soi:", value=last_d, key="matrix_date")
                         btn_scan = st.button("🚀 QUÉT SỐ", type="primary", use_container_width=True)
 
                 if btn_scan:
-                    # [FIXED-3] Sử dụng ngày từ widget chọn ngày
+                    # [FIXED-TAB3] Sử dụng ngày từ widget chọn ngày
                     target_d = target_matrix_date
                     
                     st.write(f"📅 Ngày: **{target_d.strftime('%d/%m/%Y')}**")
