@@ -14,14 +14,14 @@ import numpy as np
 # 1. CẤU HÌNH HỆ THỐNG & PRESETS
 # ==============================================================================
 st.set_page_config(
-    page_title="Quang Pro V55.1 - Stable", 
+    page_title="Quang Pro V55.2 - Ultra Stable", 
     page_icon="🛡️", 
     layout="wide",
     initial_sidebar_state="collapsed" 
 )
 
-st.title("🛡️ Quang Handsome: V55 Elite Hunter (Stable)")
-st.caption("🚀 Fix lỗi hiển thị bảng | Di Sản V54 + Matrix Quant Hunter")
+st.title("🛡️ Quang Handsome: V55 Elite Hunter (Ultra Stable)")
+st.caption("🚀 Fix lỗi nhảy bảng (Locked Editor) | Full Backtest Stats | Matrix M6-M9")
 
 CONFIG_FILE = 'config.json'
 
@@ -656,7 +656,7 @@ def main():
                                     else: st.error("Hybrid: MISS")
 
             # ==========================================================
-            # TAB 2: BACKTEST (FULL OPTIONS)
+            # TAB 2: BACKTEST (FIXED TABLE)
             # ==========================================================
             with tab2:
                 st.subheader("⚡ Backtest Toàn Diện")
@@ -750,8 +750,6 @@ def main():
                                             rank = r_idx + 1
                                             break
                                     
-                                    # Format: ✅ WIN (Số lượng) [Hạng]
-                                    # Để hàm tính toán bên dưới nhận diện được (XX), ta để format chuẩn
                                     row_data[st_name] = f"{'✅ WIN' if is_win else '❌ MISS'} ({len(final_pool)}) [Hạng {rank}]"
                                     logs.append(row_data)
 
@@ -796,20 +794,18 @@ def main():
                             df_log = pd.DataFrame(logs)
                             st.session_state['backtest_result'] = df_log
                 
-                # --- PHẦN KHÔI PHỤC THỐNG KÊ (ĐÃ FIX) ---
+                # --- [FIXED] BẢNG HIỂN THỊ ỔN ĐỊNH VỚI LOCKED EDITOR ---
                 if 'backtest_result' in st.session_state:
                     df_log = st.session_state['backtest_result']
                     st.markdown("### 📊 Thống Kê Tổng Hợp")
-                    # Lấy các cột không phải thông tin ngày/kq
+                    
                     cols_to_calc = [c for c in df_log.columns if c not in ["Ngày", "KQ", "Hạng về"]]
                     
                     if cols_to_calc:
                         st_cols = st.columns(len(cols_to_calc))
                         for i, col_name in enumerate(cols_to_calc):
                             series = df_log[col_name].astype(str)
-                            # Đếm Win (Hỗ trợ cả icon cũ và mới)
                             wins = series.apply(lambda x: 1 if "WIN" in x or "✅" in x else 0).sum()
-                            # Trích xuất số lượng trong ngoặc (...)
                             nums = series.apply(lambda x: int(re.search(r'\((\d+)\)', x).group(1)) if re.search(r'\((\d+)\)', x) else 0)
                             avg_len = nums.mean()
                             
@@ -819,8 +815,17 @@ def main():
                                     value=f"{wins}/{len(df_log)} ({(wins/len(df_log))*100:.1f}%)",
                                     delta=f"TBSL: {avg_len:.1f} số"
                                 )
-                    # FIX: Thêm key và hide_index để chống nhảy
-                    st.dataframe(df_log, use_container_width=True, height=600, hide_index=True, key="backtest_main_table")
+                    
+                    # QUAN TRỌNG: Dùng container + data_editor khóa để chống nhảy
+                    with st.container():
+                        st.data_editor(
+                            df_log, 
+                            use_container_width=True, 
+                            height=600, 
+                            hide_index=True, 
+                            disabled=True,  # Khóa chỉnh sửa -> Tăng ổn định
+                            key="backtest_main_table_fixed" # Key định danh
+                        )
 
             # ==========================================================
             # TAB 3: MATRIX CHIẾN LƯỢC (TỰ ĐỘNG HÓA)
