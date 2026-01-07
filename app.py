@@ -118,12 +118,15 @@ def extract_meta_from_filename(filename):
             elif m == 1 and m_global == 12: y += 1
             return m, y, datetime.date(y, m, d)
         except: pass
-    single_day_match = re.findall(r'(\d{1,2})$', clean_name)
-    if single_day_match:
-        try:
-            d = int(single_day_match[-1])
-            return m_global, y_global, datetime.date(y_global, m_global, d)
-        except: pass
+    
+    # [FIXED-2] ĐÃ VÔ HIỆU HÓA ĐOẠN NÀY ĐỂ TRÁNH BẮT NHẦM SỐ 26 TRONG 2026
+    # single_day_match = re.findall(r'(\d{1,2})$', clean_name)
+    # if single_day_match:
+    #     try:
+    #         d = int(single_day_match[-1])
+    #         return m_global, y_global, datetime.date(y_global, m_global, d)
+    #     except: pass
+    
     return m_global, y_global, None
 
 # ==============================================================================
@@ -252,13 +255,10 @@ def load_data_v24(files):
                 
                 kq_row = None
                 if not df.empty:
-                    # [FIXED] Chỉ quét 2 cột đầu tìm KQ để tránh bắt nhầm ghi chú ở cột xa
+                    # [FIXED-1] Chỉ quét 2 cột đầu tìm KQ. ĐÃ XÓA |ĐB|ĐẶC BIỆT
                     for c_idx in range(min(2, len(df.columns))):
                         col_check = df.columns[c_idx]
                         try:
-                            # [span_0](start_span)[span_1](start_span)=== ĐÂY LÀ CHỖ FIX QUAN TRỌNG NHẤT[span_0](end_span)[span_1](end_span) ===
-                            # Code gốc: r'KQ|KẾT QUẢ|ĐB|ĐẶC BIỆT' -> Gây lỗi bắt nhầm "Dự đoán ĐB"
-                            # Code fix: r'KQ|KẾT QUẢ' -> Chỉ bắt dòng KẾT QUẢ chuẩn
                             mask_kq = df[col_check].astype(str).str.upper().str.contains(r'KQ|KẾT QUẢ')
                             if mask_kq.any():
                                 kq_row = df[mask_kq].iloc[0]
@@ -865,11 +865,15 @@ def main():
                     with c3:
                         cut_val = st.number_input("✂️ Lấy:", value=def_cut, step=5)
                         skip_val = st.number_input("🚫 Bỏ:", value=def_skip, step=5)
+                        
+                        # [FIXED-3] Thêm Widget chọn ngày soi cho Tab Matrix
+                        target_matrix_date = st.date_input("Chọn ngày soi:", value=last_d, key="matrix_date")
                         btn_scan = st.button("🚀 QUÉT SỐ", type="primary", use_container_width=True)
 
                 if btn_scan:
-                    target_d = last_d
-                    if 'run_result' in st.session_state: target_d = st.session_state['run_result'].get('target', last_d)
+                    # [FIXED-3] Sử dụng ngày từ widget chọn ngày
+                    target_d = target_matrix_date
+                    
                     st.write(f"📅 Ngày: **{target_d.strftime('%d/%m/%Y')}**")
                     if target_d in data_cache:
                         df_target = data_cache[target_d]['df']
