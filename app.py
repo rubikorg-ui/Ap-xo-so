@@ -256,7 +256,10 @@ def load_data_v24(files):
                     for c_idx in range(min(2, len(df.columns))):
                         col_check = df.columns[c_idx]
                         try:
-                            mask_kq = df[col_check].astype(str).str.upper().str.contains(r'KQ|KẾT QUẢ|ĐB|ĐẶC BIỆT')
+                            # [span_0](start_span)[span_1](start_span)=== ĐÂY LÀ CHỖ FIX QUAN TRỌNG NHẤT[span_0](end_span)[span_1](end_span) ===
+                            # Code gốc: r'KQ|KẾT QUẢ|ĐB|ĐẶC BIỆT' -> Gây lỗi bắt nhầm "Dự đoán ĐB"
+                            # Code fix: r'KQ|KẾT QUẢ' -> Chỉ bắt dòng KẾT QUẢ chuẩn
+                            mask_kq = df[col_check].astype(str).str.upper().str.contains(r'KQ|KẾT QUẢ')
                             if mask_kq.any():
                                 kq_row = df[mask_kq].iloc[0]
                                 break
