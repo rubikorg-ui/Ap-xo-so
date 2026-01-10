@@ -720,7 +720,6 @@ def main():
                                 res_curr=res_curr,
                                 res_hc=res_hc,
                                 hybrid=hybrid_goc,
-                                kq_db=kq_db,
 )
             # --- TAB 2: BACKTEST (SINGLE MODE) ---
             with tab2:
