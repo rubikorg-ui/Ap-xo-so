@@ -716,7 +716,7 @@ def main():
                                 if real in rr['hybrid_goc']: st.success("Hybrid: WIN")
                                 else: st.error("Hybrid: MISS")
 # ===== DAY SIGNAL & WARNING (MODULE) =====
-                          pa2.render_day_signal(
+                            pa.render_day_signal(
                                 res_curr=res_curr,
                                 res_hc=res_hc,
                                 hybrid=hybrid_goc,
