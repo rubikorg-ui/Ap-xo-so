@@ -14,14 +14,14 @@ import numpy as np
 # 1. CẤU HÌNH HỆ THỐNG & PRESETS
 # ==============================================================================
 st.set_page_config(
-    page_title="Quang Pro V61 - Hybrid Analysis", 
+    page_title="Quang Pro V62 - Dynamic Hybrid", 
     page_icon="🛡️", 
     layout="wide",
     initial_sidebar_state="collapsed" 
 )
 
-st.title("🛡️ Quang Handsome: V61 Hybrid Analysis")
-st.caption("🚀 Tab Phân Tích: Hiển thị chi tiết bộ 3 (HC + CH1 = Hybrid Gốc) | Backtest Đơn Lẻ")
+st.title("🛡️ Quang Handsome: V62 Dynamic Hybrid")
+st.caption("🚀 Tính năng mới: Hybrid thay đổi theo tinh chỉnh màn hình | Backtest Đơn | M Động")
 
 CONFIG_FILE = 'config.json'
 
@@ -630,7 +630,7 @@ def main():
             last_d = max(data_cache.keys())
             tab1, tab2, tab3 = st.tabs(["📊 DỰ ĐOÁN (ANALYSIS)", "🔙 BACKTEST", "🎯 MATRIX"])
             
-            # --- TAB 1: PREDICTION (NÂNG CẤP HIỆN HYBRID GỐC) ---
+            # --- TAB 1: PREDICTION (NÂNG CẤP HYBRID ĐỘNG) ---
             with tab1:
                 st.subheader(f"Dự đoán: {STRATEGY_MODE}")
                 if USE_ADAPTIVE: st.info("🧠 M Động: BẬT")
@@ -647,7 +647,7 @@ def main():
                             curr_mod = get_adaptive_weights(target, base_mod, data_cache, kq_db, window=3, factor=1.5)
                         else: curr_std, curr_mod = base_std, base_mod
 
-                        # 1. Chạy cấu hình chính (Màn hình)
+                        # 1. Chạy cấu hình chính (Màn hình) -> Đây là "res_curr"
                         if STRATEGY_MODE == "🛡️ V24 Cổ Điển":
                             user_limits = {'l12': L_TOP_12, 'l34': L_TOP_34, 'l56': L_TOP_56, 'mod': LIMIT_MODIFIED}
                             res_curr, err_curr = calculate_v24_final(target, ROLLING_WINDOW, data_cache, kq_db, user_limits, MIN_VOTES, curr_std, curr_mod, USE_INVERSE, None, max_trim=MAX_TRIM_NUMS)
@@ -658,27 +658,26 @@ def main():
                                 err_curr = None
                             else: res_curr=None; err_curr="Lỗi"
 
-                        # 2. Chạy Hard Core (Gốc) & CH1 (Gốc) để lấy Hybrid
+                        # 2. Chạy Hard Core (Gốc) Cố định để làm trụ
                         s_hc, m_hc, l_hc, r_hc = get_preset_params("Hard Core (Gốc)")
-                        s_ch1, m_ch1, l_ch1, r_ch1 = get_preset_params("CH1: Bám Đuôi (Gốc)")
-                        
-                        if USE_ADAPTIVE:
-                            s_hc = get_adaptive_weights(target, s_hc, data_cache, kq_db, 3, 1.5)
-                            s_ch1 = get_adaptive_weights(target, s_ch1, data_cache, kq_db, 3, 1.5)
-                        
+                        if USE_ADAPTIVE: s_hc = get_adaptive_weights(target, s_hc, data_cache, kq_db, 3, 1.5)
                         res_hc = calculate_v24_logic_only(target, r_hc, data_cache, kq_db, l_hc, MIN_VOTES, s_hc, m_hc, USE_INVERSE, None, max_trim=MAX_TRIM_NUMS)
-                        res_ch1 = calculate_v24_logic_only(target, r_ch1, data_cache, kq_db, l_ch1, MIN_VOTES, s_ch1, m_ch1, USE_INVERSE, None, max_trim=MAX_TRIM_NUMS)
                         
+                        # 3. TÍNH HYBRID ĐỘNG (Dynamic Intersection)
+                        # Hybrid = Giao của [Hard Core] + [Dàn Hiện Tại trên Màn Hình]
+                        # Điều này đảm bảo khi bạn chỉnh màn hình, Hybrid sẽ thay đổi theo.
                         hybrid_goc = []
-                        hc_goc = []; ch1_goc = []
-                        if res_hc and res_ch1:
+                        hc_goc = []
+                        screen_goc = []
+                        
+                        if res_hc and res_curr:
                             hc_goc = res_hc['dan_goc']
-                            ch1_goc = res_ch1['dan_goc']
-                            hybrid_goc = sorted(list(set(hc_goc).intersection(set(ch1_goc))))
+                            screen_goc = res_curr['dan_goc'] # Dàn bạn đang chỉnh (CH1 hoặc bất cứ gì)
+                            hybrid_goc = sorted(list(set(hc_goc).intersection(set(screen_goc))))
 
                         st.session_state['run_result'] = {
                             'res_curr': res_curr, 'target': target, 'err': err_curr,
-                            'hc_goc': hc_goc, 'ch1_goc': ch1_goc, 'hybrid_goc': hybrid_goc
+                            'hc_goc': hc_goc, 'screen_goc': screen_goc, 'hybrid_goc': hybrid_goc
                         }
 
                 if 'run_result' in st.session_state and st.session_state['run_result']['target'] == target:
@@ -686,9 +685,8 @@ def main():
                     if not rr['err']:
                         st.info(f"Phân nhóm nguồn: {res['source_col']}")
                         
-                        # HIỂN THỊ CHÍNH
                         cols_main = []
-                        t_lbl = "Gốc 3" if STRATEGY_MODE == "⚔️ Gốc 3 Bá Đạo" else "Gốc V24"
+                        t_lbl = "Gốc 3" if STRATEGY_MODE == "⚔️ Gốc 3 Bá Đạo" else "Gốc V24 (Màn Hình)"
                         if show_goc: cols_main.append({"t": f"{t_lbl} ({len(res['dan_goc'])})", "d": res['dan_goc']})
                         if show_final: cols_main.append({"t": f"Final ({len(res['dan_final'])})", "d": res['dan_final']})
                         
@@ -698,11 +696,13 @@ def main():
                                 with c_m[i]: st.text_area(o['t'], ",".join(o['d']), height=100)
                         
                         st.divider()
-                        st.write("#### 🧬 Phân Tích Chuyên Sâu (Hybrid Gốc)")
+                        st.write("#### 🧬 Phân Tích Hybrid (Hard Core + Màn Hình)")
+                        st.caption("Dàn Hybrid này là giao thoa giữa **Hard Core (Gốc)** và **Cấu hình bạn đang chỉnh**.")
+                        
                         c_h1, c_h2, c_h3 = st.columns(3)
-                        with c_h1: st.text_area(f"Hard Core ({len(rr['hc_goc'])})", ",".join(rr['hc_goc']), height=100)
-                        with c_h2: st.text_area(f"CH1 Gốc ({len(rr['ch1_goc'])})", ",".join(rr['ch1_goc']), height=100)
-                        with c_h3: st.text_area(f"⚔️ HYBRID ({len(rr['hybrid_goc'])})", ",".join(rr['hybrid_goc']), height=100)
+                        with c_h1: st.text_area(f"Hard Core (Trụ) ({len(rr['hc_goc'])})", ",".join(rr['hc_goc']), height=100)
+                        with c_h2: st.text_area(f"Màn Hình (Biến) ({len(rr['screen_goc'])})", ",".join(rr['screen_goc']), height=100)
+                        with c_h3: st.text_area(f"⚔️ HYBRID ĐỘNG ({len(rr['hybrid_goc'])})", ",".join(rr['hybrid_goc']), height=100)
 
                         if target in kq_db:
                             real = kq_db[target]
