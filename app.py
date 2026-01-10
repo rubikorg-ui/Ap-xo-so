@@ -9,7 +9,7 @@ from datetime import timedelta
 from collections import Counter
 from functools import lru_cache
 import numpy as np
-import pa2_daysignal_strategy as pa28
+import pa2_daysignal_strategy as pa2
 # ==============================================================================
 # 1. CẤU HÌNH HỆ THỐNG & PRESETS
 # ==============================================================================
