@@ -376,7 +376,6 @@ def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits
         final_modified = sorted(fast_get_top_nums(df[mask_mod], s_map_dict, p_map_dict, int(limits_config['mod']), min_votes, use_inverse))
     intersect_list = list(set(final_original).intersection(set(final_modified)))
     if max_trim and len(intersect_list) > max_trim:
-        # Tái sử dụng logic Smart Cut ở đây nếu cần, nhưng để giữ nguyên logic cũ:
         temp_df = df.copy()
         melted = temp_df.melt(value_name='Val').dropna(subset=['Val'])
         mask_bad = ~melted['Val'].astype(str).str.upper().str.contains(r'N|NGHI|SX|XIT', regex=True)
@@ -768,8 +767,13 @@ def main():
                                     if res: logs.append({"Ngày": d.strftime("%d/%m"), "KQ": real_kq, f"Gốc 3 ({st.session_state['G3_TARGET']}s)": check_win(real_kq, res['dan_final'])})
                             
                             else: # Full Presets V24
-                                # (Chạy loop qua presets nếu cần, ở đây chạy demo 1 cái chính)
-                                logs.append({"Ngày": d.strftime("%d/%m"), "KQ": real_kq, "Info": "Chọn chế độ khác để test"})
+                                for p_name in SCORES_PRESETS:
+                                    s, m, l, r = get_preset_params(p_name)
+                                    if use_adaptive_bt:
+                                        s = get_adaptive_weights(d, s, data_cache, kq_db, 3, 1.5)
+                                        m = get_adaptive_weights(d, m, data_cache, kq_db, 3, 1.5)
+                                    res = calculate_v24_logic_only(d, r, data_cache, kq_db, l, MIN_VOTES, s, m, USE_INVERSE, None, max_trim=MAX_TRIM_NUMS)
+                                    if res: logs.append({"Ngày": d.strftime("%d/%m"), "KQ": real_kq, f"{p_name}": check_win(real_kq, res['dan_final'])})
 
                         bar.empty()
                         if logs:
