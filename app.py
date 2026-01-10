@@ -9,7 +9,7 @@ from datetime import timedelta
 from collections import Counter
 from functools import lru_cache
 import numpy as np
-import pa2_daysignal_strategy as pa2
+import pa2_preanalysis_text as pa2
 # ==============================================================================
 # 1. CẤU HÌNH HỆ THỐNG & PRESETS
 # ==============================================================================
@@ -716,7 +716,7 @@ def main():
                                 if real in rr['hybrid_goc']: st.success("Hybrid: WIN")
                                 else: st.error("Hybrid: MISS")
 # ===== DAY SIGNAL & WARNING (MODULE) =====
-                            pa2.render_day_signal(
+                            pa2.render_pa2_preanalysis(
                                 res_curr=res_curr,
                                 res_hc=res_hc,
                                 hybrid=hybrid_goc,
