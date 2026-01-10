@@ -92,7 +92,7 @@ def get_col_score(col_name, mapping_tuple):
             return score
     return 0
 
-# --- ADAPTIVE M WEIGHTING LOGIC (MỚI) ---
+# --- [NEW] ADAPTIVE M WEIGHTING LOGIC ---
 def get_adaptive_weights(target_date, base_weights, data_cache, kq_db, window=3, factor=1.5):
     """
     Tính toán bộ trọng số M Động dựa trên hiệu quả 3 ngày gần nhất.
@@ -136,6 +136,7 @@ def get_adaptive_weights(target_date, base_weights, data_cache, kq_db, window=3,
         new_weights[i] = round(adjusted_w, 1)
         
     return new_weights
+# ----------------------------------------
 
 def parse_date_smart(col_str, f_m, f_y):
     s = str(col_str).strip().upper()
@@ -198,8 +199,10 @@ def load_data_v24(files):
     for file in files:
         if file.name.upper().startswith('~$') or 'N.CSV' in file.name.upper(): continue
         f_m, f_y, date_from_name = extract_meta_from_filename(file.name)
+        
         try:
             dfs_to_process = []
+            
             if file.name.endswith('.xlsx'):
                 xls = pd.ExcelFile(file, engine='openpyxl')
                 for sheet in xls.sheet_names:
@@ -213,17 +216,20 @@ def load_data_v24(files):
                             s_date = datetime.date(y_s, m_s, d_s)
                     except: pass
                     if not s_date: s_date = date_from_name
+
                     if s_date:
                         preview = pd.read_excel(xls, sheet_name=sheet, header=None, nrows=30, engine='openpyxl')
                         h_row = find_header_row(preview)
                         df = pd.read_excel(xls, sheet_name=sheet, header=h_row, engine='openpyxl')
                         dfs_to_process.append((s_date, df))
                 file_status.append(f"✅ Excel: {file.name}")
+
             elif file.name.endswith('.csv'):
                 if not date_from_name: continue
                 encodings_to_try = ['utf-8-sig', 'utf-8', 'latin-1', 'cp1252', 'utf-16']
                 df_raw = None
                 h_row = 0
+                
                 for enc in encodings_to_try:
                     try:
                         file.seek(0)
@@ -233,10 +239,13 @@ def load_data_v24(files):
                         df_raw = pd.read_csv(file, header=None, encoding=enc)
                         break
                     except: continue
+                
                 if df_raw is None:
                     err_logs.append(f"❌ Lỗi Encoding: {file.name}")
                     continue
+                
                 df = df_raw.iloc[h_row+1:].copy()
+                
                 raw_cols = df_raw.iloc[h_row].astype(str).tolist()
                 seen = {}
                 final_cols = []
@@ -249,19 +258,26 @@ def load_data_v24(files):
                         seen[c] = 0
                         final_cols.append(c)
                 df.columns = final_cols
+                
+                # Fallback cột M
                 if not any(c.startswith('M') for c in final_cols):
                     if h_row != 3:
                         h_row = 3
                         df = df_raw.iloc[h_row+1:].copy()
                         df.columns = [str(c).strip().upper().replace('M 1 0', 'M10') for c in df_raw.iloc[h_row]]
+                    
                 dfs_to_process.append((date_from_name, df))
                 file_status.append(f"✅ CSV: {file.name}")
 
             for t_date, df in dfs_to_process:
                 df.columns = [str(c).strip().upper().replace('\ufeff', '') for c in df.columns]
+                
                 score_col = next((c for c in df.columns if 'Đ9' in c or 'DIEM' in c or 'ĐIỂM' in c), None)
-                if score_col: df['SCORE_SORT'] = pd.to_numeric(df[score_col], errors='coerce').fillna(0)
-                else: df['SCORE_SORT'] = 0
+                if score_col:
+                    df['SCORE_SORT'] = pd.to_numeric(df[score_col], errors='coerce').fillna(0)
+                else:
+                    df['SCORE_SORT'] = 0
+                
                 rename_map = {}
                 for c in df.columns:
                     clean_c = c.replace(" ", "")
@@ -274,6 +290,7 @@ def load_data_v24(files):
                     if "UNNAMED" in col or col.startswith("M") or col in ["STT", "SCORE_SORT"]: continue
                     d_obj = parse_date_smart(col, f_m, f_y)
                     if d_obj: hist_map[d_obj] = col
+                
                 kq_row = None
                 if not df.empty:
                     for c_idx in range(min(2, len(df.columns))):
@@ -290,6 +307,7 @@ def load_data_v24(files):
                             nums = get_nums(str(kq_row[c_name]))
                             if nums: kq_db[d_val] = nums[0]
                         except: pass
+                        
                 cache[t_date] = {'df': df, 'hist_map': hist_map}
         except Exception as e:
             err_logs.append(f"Lỗi '{file.name}': {str(e)}")
@@ -514,6 +532,7 @@ def save_config(config_data):
             json.dump(config_data, f, indent=4)
         return True
     except: return False
+
 # ==============================================================================
 # 3. GIAO DIỆN CHÍNH (MAIN APP)
 # ==============================================================================
@@ -602,7 +621,7 @@ def main():
         MIN_VOTES = st.number_input("Vote tối thiểu:", min_value=1, max_value=10, key="MIN_VOTES")
         USE_INVERSE = st.checkbox("Chấm Điểm Đảo (Ngược)", key="USE_INVERSE")
         
-        # --- TÙY CHỌN M ĐỘNG (ADAPTIVE) ---
+        # --- [NEW] TÙY CHỌN M ĐỘNG (ADAPTIVE) ---
         st.markdown("---")
         st.markdown("### 🧠 Trí tuệ nhân tạo")
         USE_ADAPTIVE = st.checkbox("Kích hoạt M Động (Adaptive)", value=False, help="Tự động điều chỉnh điểm số dựa trên hiệu quả 3 ngày gần nhất.")
@@ -792,4 +811,81 @@ def main():
                                 else:
                                     s = {f'M{i}': st.session_state[f'std_{i}'] for i in range(11)}
                                     m = {f'M{i}': st.session_state[f'mod_{i}'] for i in range(11)}
-                                    l = {
+                                    l = {'l12': L_TOP_12, 'l34': L_TOP_34, 'l56': L_TOP_56, 'mod': LIMIT_MODIFIED}
+                                
+                                if use_adaptive_bt:
+                                    s = get_adaptive_weights(d, s, data_cache, kq_db, 3, 1.5)
+                                    m = get_adaptive_weights(d, m, data_cache, kq_db, 3, 1.5)
+                                    
+                                res = calculate_v24_logic_only(d, ROLLING_WINDOW, data_cache, kq_db, l, MIN_VOTES, s, m, USE_INVERSE, None, max_trim=MAX_TRIM_NUMS)
+                                if res:
+                                    logs.append({
+                                        "Ngày": d.strftime("%d/%m"), "KQ": real_kq,
+                                        "M10": s.get('M10', 0),
+                                        "Gốc": f"{check_win(real_kq, res['dan_goc'])} ({len(res['dan_goc'])})",
+                                        "Final": f"{check_win(real_kq, res['dan_final'])} ({len(res['dan_final'])})"
+                                    })
+
+                        bar.empty()
+                        if logs:
+                            df_log = pd.DataFrame(logs)
+                            st.session_state['backtest_result'] = df_log
+                            st.dataframe(df_log, use_container_width=True, height=600)
+
+            # TAB 3: MATRIX (Giữ nguyên)
+            with tab3:
+                st.subheader("🎯 MA TRẬN CHIẾN LƯỢC: QUANT HUNTER")
+                with st.container(border=True):
+                    c1, c2, c3 = st.columns([1.5, 1.5, 1])
+                    with c1:
+                        strategy_mode = st.selectbox("⚔️ Chọn Chiến Thuật:", ["🔥 Mid-Range Focus (Săn M6-M9)", "🛡️ Storm Shelter (Thủ M10 Only)", "💎 Elite 5 (Vip Mode)", "👥 Đại Trà (Top 10 File)"], index=0)
+                    with c2:
+                        if "Săn M6-M9" in strategy_mode:
+                            current_weights = [0, 0, 0, 0, 0, 0, 30, 40, 50, 60, 0]
+                            top_n_select = 10; filter_mode = 'score'; def_cut = 40; def_skip = 0
+                            st.success("⚡ M6-M9 Focus")
+                        elif "Thủ M10" in strategy_mode:
+                            current_weights = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 60]
+                            top_n_select = 20; filter_mode = 'score'; def_cut = 80; def_skip = 0
+                            st.warning("🛡️ M10 Defense")
+                        elif "Elite 5" in strategy_mode:
+                            current_weights = [0, 0, 5, 10, 15, 25, 30, 35, 40, 50, 60]
+                            top_n_select = 5; filter_mode = 'score'; def_cut = 65; def_skip = 0
+                            st.info("💎 Top 5 Elite")
+                        else:
+                            current_weights = [0, 0, 5, 10, 15, 25, 30, 35, 40, 50, 60]
+                            top_n_select = 10; filter_mode = 'stt'; def_cut = 65; def_skip = 0
+                            st.info("🔹 Top 10 File")
+                    with c3:
+                        cut_val = st.number_input("✂️ Lấy:", value=def_cut, step=5)
+                        skip_val = st.number_input("🚫 Bỏ:", value=def_skip, step=5)
+                        target_matrix_date = st.date_input("Chọn ngày soi:", value=last_d, key="matrix_date")
+                        btn_scan = st.button("🚀 QUÉT SỐ", type="primary", use_container_width=True)
+
+                if btn_scan:
+                    target_d = target_matrix_date
+                    st.write(f"📅 Ngày: **{target_d.strftime('%d/%m/%Y')}**")
+                    if target_d in data_cache:
+                        df_target = data_cache[target_d]['df']
+                        with st.spinner("Đang xử lý..."):
+                            input_df = get_elite_members(df_target, top_n=top_n_select, sort_by=filter_mode)
+                            with st.expander("📋 Danh sách Cao thủ"):
+                                st.dataframe(input_df[['STT', 'MEMBER', 'SCORE_SORT'] if 'MEMBER' in input_df.columns else input_df.columns], use_container_width=True)
+                            ranked_numbers = calculate_matrix_simple(input_df, current_weights)
+                            start_idx = skip_val; end_idx = skip_val + cut_val
+                            final_set = [n for n, score in ranked_numbers[start_idx:end_idx]]
+                            final_set.sort()
+                            st.divider()
+                            st.text_area("👇 Dàn số:", value=",".join([f"{n:02d}" for n in final_set]), height=100)
+                            col_s1, col_s2 = st.columns(2)
+                            with col_s1: st.metric("Số lượng", f"{len(final_set)}")
+                            with col_s2:
+                                if target_d in kq_db:
+                                    real = kq_db[target_d]
+                                    real_int = int(real)
+                                    rank = next((i+1 for i, (n,s) in enumerate(ranked_numbers) if n == real_int), 999)
+                                    if start_idx < rank <= end_idx: st.success(f"WIN: {real} (Hạng {rank})")
+                                    else: st.error(f"MISS: {real} (Hạng {rank})")
+
+if __name__ == "__main__":
+    main()
