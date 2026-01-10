@@ -719,7 +719,7 @@ def main():
                             pa2.render_pa2_preanalysis(
                                 res_curr=res_curr,
                                 res_hc=res_hc,
-                                hybrid=hybrid_goc,
+                                hybrid_goc=hybrid_goc,
 )
             # --- TAB 2: BACKTEST (SINGLE MODE) ---
             with tab2:
