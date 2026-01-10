@@ -20,18 +20,19 @@ st.set_page_config(
     initial_sidebar_state="collapsed" 
 )
 
-st.title("🛡️ Quang Handsome: V57 Elite Hunter (Mobile Fix)")
-st.caption("🚀 Fix hiển thị Backtest trên Mobile | Rolling Window Chuẩn | M Động")
+st.title("🛡️ Quang Handsome: V57 Elite Hunter (Full Stats Fix)")
+st.caption("🚀 Fix Rolling Window riêng biệt | Khôi phục Thống kê Win/Size | Backtest Đa Chế Độ")
 
 CONFIG_FILE = 'config.json'
 
 # --- CÁC CẤU HÌNH MẪU (PRESETS) ---
+# Đã thêm tham số 'ROLLING' riêng cho từng cấu hình
 SCORES_PRESETS = {
     "Balanced (Khuyên dùng 2026)": { 
         "STD": [5, 10, 15, 20, 25, 30, 40, 45, 50, 60, 70], 
         "MOD": [5, 10, 15, 20, 25, 30, 40, 45, 50, 60, 70],
         "LIMITS": {'l12': 75, 'l34': 70, 'l56': 65, 'mod': 75},
-        "ROLLING": 10
+        "ROLLING": 10 # Cấu hình mới dùng 10 ngày cho ổn định
     },
     "CH1 Fix (Siết chặt)": { 
         "STD": [10, 20, 30, 30, 30, 30, 40, 40, 50, 50, 70], 
@@ -43,13 +44,13 @@ SCORES_PRESETS = {
         "STD": [0, 0, 5, 10, 15, 25, 30, 35, 40, 50, 60], 
         "MOD": [0, 5, 10, 20, 25, 45, 50, 40, 30, 25, 40],
         "LIMITS": {'l12': 82, 'l34': 76, 'l56': 70, 'mod': 88},
-        "ROLLING": 10
+        "ROLLING": 10 # Giữ nguyên logic cũ
     },
     "CH1: Bám Đuôi (Gốc)": { 
         "STD": [10, 20, 30, 30, 30, 30, 40, 40, 50, 50, 70], 
         "MOD": [10, 20, 30, 30, 30, 30, 40, 40, 50, 50, 70],
         "LIMITS": {'l12': 80, 'l34': 75, 'l56': 60, 'mod': 88},
-        "ROLLING": 10
+        "ROLLING": 10 # Giữ nguyên logic cũ
     }
 }
 
@@ -86,7 +87,7 @@ def get_col_score(col_name, mapping_tuple):
             return score
     return 0
 
-# --- ADAPTIVE M WEIGHTING LOGIC ---
+# --- [NEW] ADAPTIVE M WEIGHTING LOGIC ---
 def get_adaptive_weights(target_date, base_weights, data_cache, kq_db, window=3, factor=1.5):
     m_hits = {i: 0 for i in range(11)}
     m_total = {i: 0 for i in range(11)}
