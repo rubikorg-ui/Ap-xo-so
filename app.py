@@ -10,6 +10,7 @@ from collections import Counter
 from functools import lru_cache
 import numpy as np
 import pa2_preanalysis_text as pa2
+
 # ==============================================================================
 # 1. CẤU HÌNH HỆ THỐNG & PRESETS
 # ==============================================================================
@@ -21,7 +22,7 @@ st.set_page_config(
 )
 
 st.title("🛡️ Quang Handsome: V62 Dynamic Hybrid")
-st.caption("🚀 Tính năng mới: Hybrid thay đổi theo tinh chỉnh màn hình | Backtest Đơn | M Động")
+st.caption("🚀 Tính năng mới: Auto-Calibration (Tự động phân M mọi miền) | Hybrid | Backtest Đơn")
 
 CONFIG_FILE = 'config.json'
 
@@ -84,6 +85,7 @@ def get_col_score(col_name, mapping_tuple):
             return score
     return 0
 
+# --- CŨ: Hàm Adaptive cũ (giữ nguyên để không lỗi) ---
 def get_adaptive_weights(target_date, base_weights, data_cache, kq_db, window=3, factor=1.5):
     m_hits = {i: 0 for i in range(11)}
     m_total = {i: 0 for i in range(11)}
@@ -117,6 +119,59 @@ def get_adaptive_weights(target_date, base_weights, data_cache, kq_db, window=3,
         adjusted_w = base_w * (1 + factor * eff)
         new_weights[i] = round(adjusted_w, 1)
     return new_weights
+
+# --- MỚI: Hàm Auto-Calibration (Phân M Tự động) ---
+def calculate_auto_weights_from_data(target_date, data_cache, kq_db, lookback=10):
+    """
+    Tự động tính điểm cho M0-M10 dựa trên Ranking hiệu suất N ngày qua.
+    Tạo biến động mạnh: Top 1 = 60 điểm, giảm dần xuống 0.
+    """
+    m_performance = {i: 0 for i in range(11)} 
+    check_date = target_date - timedelta(days=1)
+    past_days = []
+    
+    # 1. Quét dữ liệu quá khứ theo lookback custom
+    while len(past_days) < lookback:
+        if check_date in data_cache and check_date in kq_db:
+            past_days.append(check_date)
+        check_date -= timedelta(days=1)
+        if (target_date - check_date).days > 60: break # Safety break
+        
+    if not past_days:
+        return {f'M{i}': 10 for i in range(11)} # Fallback đều nhau
+
+    # 2. Đếm số lần trúng của từng M
+    for d in past_days:
+        real_kq = str(kq_db[d]).zfill(2)
+        df = data_cache[d]['df']
+        cols = [c for c in df.columns if re.match(r'^M\s*\d+', c) or c in ['M10', 'M 1 0']]
+        
+        m_map = {}
+        for c in cols:
+            clean = c.replace(' ', '').replace('M', '')
+            try: idx = int(clean); m_map[c] = idx
+            except: pass
+            
+        for c_name, m_idx in m_map.items():
+            # Gom toàn bộ số trong cột M đó của ngày d
+            all_nums = []
+            for val in df[c_name].dropna():
+                all_nums.extend(get_nums(val))
+            # Nếu KQ nằm trong đám số đó -> M đó được điểm
+            if real_kq in all_nums:
+                m_performance[m_idx] += 1
+
+    # 3. Xếp hạng & Gán điểm (Ranking Distribution)
+    sorted_m = sorted(m_performance.items(), key=lambda x: x[1], reverse=True)
+    # Thang điểm "Gắt" để tạo biến động
+    ranking_scores = [60, 50, 40, 30, 25, 20, 15, 10, 5, 0, 0]
+    
+    final_weights = {}
+    for rank, (m_idx, count) in enumerate(sorted_m):
+        score = ranking_scores[rank] if rank < len(ranking_scores) else 0
+        final_weights[f'M{m_idx}'] = score
+        
+    return final_weights
 
 def parse_date_smart(col_str, f_m, f_y):
     s = str(col_str).strip().upper().replace('NGAY', '').replace('NGÀY', '').strip()
@@ -250,8 +305,7 @@ def load_data_v24(files):
                 cache[t_date] = {'df': df, 'hist_map': hist_map}
         except Exception as e: err_logs.append(f"Lỗi '{file.name}': {str(e)}"); continue
     return cache, kq_db, file_status, err_logs
-
-def fast_get_top_nums(df, p_map_dict, s_map_dict, top_n, min_v, inverse):
+    def fast_get_top_nums(df, p_map_dict, s_map_dict, top_n, min_v, inverse):
     cols_in_scope = sorted(list(set(p_map_dict.keys()) | set(s_map_dict.keys())))
     valid_cols = [c for c in cols_in_scope if c in df.columns]
     if not valid_cols or df.empty: return []
@@ -517,6 +571,8 @@ def main():
             source_flat['STRATEGY_MODE'] = "🛡️ V24 Cổ Điển"
             source_flat['G3_INPUT'] = 75
             source_flat['G3_TARGET'] = 70
+            source_flat['USE_AUTO_WEIGHTS'] = False
+            source_flat['AUTO_LOOKBACK'] = 10
             source = source_flat
         for k, v in source.items():
             if k in ['STD', 'MOD', 'LIMITS']: continue 
@@ -556,8 +612,18 @@ def main():
         menu_ops = ["Cấu hình đã lưu (Saved)"] + list(SCORES_PRESETS.keys()) if os.path.exists(CONFIG_FILE) else list(SCORES_PRESETS.keys())
         st.selectbox("📚 Chọn bộ mẫu:", options=menu_ops, index=1, key="preset_choice", on_change=update_scores)
 
-        ROLLING_WINDOW = st.number_input("Chu kỳ xét (Ngày)", min_value=1, key="ROLLING_WINDOW")
+        ROLLING_WINDOW = st.number_input("Chu kỳ xét V24 (Ngày)", min_value=1, key="ROLLING_WINDOW")
         
+        # --- AUTO CALIBRATION (NEW) ---
+        st.markdown("---")
+        st.header("🤖 Auto-Config (Mọi Miền)")
+        st.caption("Tự động phân bố điểm M theo dữ liệu thực tế. Bỏ qua điểm cài đặt bên dưới.")
+        st.session_state['USE_AUTO_WEIGHTS'] = st.checkbox("Kích hoạt Auto-Calibration", value=st.session_state.get('USE_AUTO_WEIGHTS', False))
+        USE_AUTO_WEIGHTS = st.session_state['USE_AUTO_WEIGHTS']
+        st.session_state['AUTO_LOOKBACK'] = st.number_input("Chu kỳ quét Auto (Ngày)", min_value=3, max_value=60, value=st.session_state.get('AUTO_LOOKBACK', 10), key="AUTO_LOOKBACK_KEY")
+        AUTO_LOOKBACK = st.session_state['AUTO_LOOKBACK']
+        st.markdown("---")
+
         # --- CẤU HÌNH ĐỘNG THEO CHẾ ĐỘ ---
         if STRATEGY_MODE == "🛡️ V24 Cổ Điển":
             with st.expander("✂️ Cắt Top V24", expanded=True):
@@ -573,13 +639,15 @@ def main():
             L_TOP_12=0; L_TOP_34=0; L_TOP_56=0; LIMIT_MODIFIED=0; MAX_TRIM_NUMS=75
 
         with st.expander("🎚️ 1. Điểm & Auto Limit", expanded=False):
+            if USE_AUTO_WEIGHTS:
+                st.info("⚠️ Đang bật Auto-Calibration. Điểm ở đây sẽ bị bỏ qua!")
             c_s1, c_s2 = st.columns(2)
             with c_s1:
                 st.write("**GỐC**")
-                for i in range(11): st.number_input(f"M{i}", key=f"std_{i}")
+                for i in range(11): st.number_input(f"M{i}", key=f"std_{i}", disabled=USE_AUTO_WEIGHTS)
             with c_s2:
                 st.write("**MOD**")
-                for i in range(11): st.number_input(f"M{i}", key=f"mod_{i}")
+                for i in range(11): st.number_input(f"M{i}", key=f"mod_{i}", disabled=USE_AUTO_WEIGHTS)
 
         st.markdown("---")
         with st.expander("👁️ Hiển thị (Dự Đoán)", expanded=True):
@@ -595,7 +663,7 @@ def main():
         USE_INVERSE = st.checkbox("Chấm Điểm Đảo (Ngược)", key="USE_INVERSE")
         
         st.markdown("---")
-        st.session_state['USE_ADAPTIVE'] = st.checkbox("🧠 Kích hoạt M Động (Adaptive)", value=st.session_state.get('USE_ADAPTIVE', False))
+        st.session_state['USE_ADAPTIVE'] = st.checkbox("🧠 M Động Cũ (Adaptive)", value=st.session_state.get('USE_ADAPTIVE', False), disabled=USE_AUTO_WEIGHTS)
         USE_ADAPTIVE = st.session_state['USE_ADAPTIVE']
 
         if st.button("💾 LƯU CẤU HÌNH", type="secondary", use_container_width=True):
@@ -611,7 +679,9 @@ def main():
                 'USE_ADAPTIVE': st.session_state['USE_ADAPTIVE'],
                 'STRATEGY_MODE': st.session_state['STRATEGY_MODE'],
                 'G3_INPUT': st.session_state.get('G3_INPUT', 75),
-                'G3_TARGET': st.session_state.get('G3_TARGET', 70)
+                'G3_TARGET': st.session_state.get('G3_TARGET', 70),
+                'USE_AUTO_WEIGHTS': st.session_state['USE_AUTO_WEIGHTS'],
+                'AUTO_LOOKBACK': st.session_state['AUTO_LOOKBACK']
             })
             if save_config(save_data): st.success("Đã lưu!"); time.sleep(1); st.rerun()
         
@@ -630,24 +700,33 @@ def main():
             last_d = max(data_cache.keys())
             tab1, tab2, tab3 = st.tabs(["📊 DỰ ĐOÁN (ANALYSIS)", "🔙 BACKTEST", "🎯 MATRIX"])
             
-            # --- TAB 1: PREDICTION (NÂNG CẤP HYBRID ĐỘNG) ---
+            # --- TAB 1: PREDICTION ---
             with tab1:
                 st.subheader(f"Dự đoán: {STRATEGY_MODE}")
-                if USE_ADAPTIVE: st.info("🧠 M Động: BẬT")
+                if USE_AUTO_WEIGHTS: st.success(f"🤖 Auto-Calibration: ON (Quét {AUTO_LOOKBACK} ngày)")
+                elif USE_ADAPTIVE: st.info("🧠 M Động Cũ: ON")
+                
                 c_d1, c_d2 = st.columns([1, 1])
                 with c_d1: target = st.date_input("Ngày:", value=last_d)
 
                 if st.button("🚀 CHẠY PHÂN TÍCH & SOI HYBRID", type="primary", use_container_width=True):
                     with st.spinner("Đang tính toán..."):
+                        # Logic phân bổ trọng số
                         base_std = {f'M{i}': st.session_state[f'std_{i}'] for i in range(11)}
                         base_mod = {f'M{i}': st.session_state[f'mod_{i}'] for i in range(11)}
                         
-                        if USE_ADAPTIVE:
+                        if USE_AUTO_WEIGHTS:
+                            # SỬ DỤNG AUTO CALIBRATION (GHI ĐÈ ĐIỂM)
+                            auto_w = calculate_auto_weights_from_data(target, data_cache, kq_db, lookback=AUTO_LOOKBACK)
+                            curr_std = auto_w
+                            curr_mod = auto_w
+                        elif USE_ADAPTIVE:
                             curr_std = get_adaptive_weights(target, base_std, data_cache, kq_db, window=3, factor=1.5)
                             curr_mod = get_adaptive_weights(target, base_mod, data_cache, kq_db, window=3, factor=1.5)
-                        else: curr_std, curr_mod = base_std, base_mod
+                        else: 
+                            curr_std, curr_mod = base_std, base_mod
 
-                        # 1. Chạy cấu hình chính (Màn hình) -> Đây là "res_curr"
+                        # 1. Chạy cấu hình chính
                         if STRATEGY_MODE == "🛡️ V24 Cổ Điển":
                             user_limits = {'l12': L_TOP_12, 'l34': L_TOP_34, 'l56': L_TOP_56, 'mod': LIMIT_MODIFIED}
                             res_curr, err_curr = calculate_v24_final(target, ROLLING_WINDOW, data_cache, kq_db, user_limits, MIN_VOTES, curr_std, curr_mod, USE_INVERSE, None, max_trim=MAX_TRIM_NUMS)
@@ -658,35 +737,38 @@ def main():
                                 err_curr = None
                             else: res_curr=None; err_curr="Lỗi"
 
-                        # 2. Chạy Hard Core (Gốc) Cố định để làm trụ
+                        # 2. Chạy Hard Core (Gốc) Cố định để làm trụ (Luôn dùng tĩnh để đối chiếu)
                         s_hc, m_hc, l_hc, r_hc = get_preset_params("Hard Core (Gốc)")
-                        if USE_ADAPTIVE: s_hc = get_adaptive_weights(target, s_hc, data_cache, kq_db, 3, 1.5)
                         res_hc = calculate_v24_logic_only(target, r_hc, data_cache, kq_db, l_hc, MIN_VOTES, s_hc, m_hc, USE_INVERSE, None, max_trim=MAX_TRIM_NUMS)
                         
-                        # 3. TÍNH HYBRID ĐỘNG (Dynamic Intersection)
-                        # Hybrid = Giao của [Hard Core] + [Dàn Hiện Tại trên Màn Hình]
-                        # Điều này đảm bảo khi bạn chỉnh màn hình, Hybrid sẽ thay đổi theo.
+                        # 3. Hybrid
                         hybrid_goc = []
                         hc_goc = []
                         screen_goc = []
                         
                         if res_hc and res_curr:
                             hc_goc = res_hc['dan_goc']
-                            screen_goc = res_curr['dan_goc'] # Dàn bạn đang chỉnh (CH1 hoặc bất cứ gì)
+                            screen_goc = res_curr['dan_goc'] 
                             hybrid_goc = sorted(list(set(hc_goc).intersection(set(screen_goc))))
 
                         st.session_state['run_result'] = {
                             'res_curr': res_curr, 'target': target, 'err': err_curr,
-                            'hc_goc': hc_goc, 'screen_goc': screen_goc, 'hybrid_goc': hybrid_goc
+                            'hc_goc': hc_goc, 'screen_goc': screen_goc, 'hybrid_goc': hybrid_goc,
+                            'curr_weights': curr_std if USE_AUTO_WEIGHTS else None
                         }
 
                 if 'run_result' in st.session_state and st.session_state['run_result']['target'] == target:
                     rr = st.session_state['run_result']; res = rr['res_curr']
+                    
+                    if USE_AUTO_WEIGHTS and rr['curr_weights']:
+                        with st.expander("🤖 Chi tiết điểm Auto-Calibration"):
+                            st.write(rr['curr_weights'])
+
                     if not rr['err']:
                         st.info(f"Phân nhóm nguồn: {res['source_col']}")
                         
                         cols_main = []
-                        t_lbl = "Gốc 3" if STRATEGY_MODE == "⚔️ Gốc 3 Bá Đạo" else "Gốc V24 (Màn Hình)"
+                        t_lbl = "Gốc 3" if STRATEGY_MODE == "⚔️ Gốc 3 Bá Đạo" else "Gốc V24 (Màn Hình/Auto)"
                         if show_goc: cols_main.append({"t": f"{t_lbl} ({len(res['dan_goc'])})", "d": res['dan_goc']})
                         if show_final: cols_main.append({"t": f"Final ({len(res['dan_final'])})", "d": res['dan_final']})
                         
@@ -696,12 +778,11 @@ def main():
                                 with c_m[i]: st.text_area(o['t'], ",".join(o['d']), height=100)
                         
                         st.divider()
-                        st.write("#### 🧬 Phân Tích Hybrid (Hard Core + Màn Hình)")
-                        st.caption("Dàn Hybrid này là giao thoa giữa **Hard Core (Gốc)** và **Cấu hình bạn đang chỉnh**.")
+                        st.write("#### 🧬 Phân Tích Hybrid (Hard Core + Màn Hình/Auto)")
                         
                         c_h1, c_h2, c_h3 = st.columns(3)
                         with c_h1: st.text_area(f"Hard Core (Trụ) ({len(rr['hc_goc'])})", ",".join(rr['hc_goc']), height=100)
-                        with c_h2: st.text_area(f"Màn Hình (Biến) ({len(rr['screen_goc'])})", ",".join(rr['screen_goc']), height=100)
+                        with c_h2: st.text_area(f"Màn Hình/Auto (Biến) ({len(rr['screen_goc'])})", ",".join(rr['screen_goc']), height=100)
                         with c_h3: st.text_area(f"⚔️ HYBRID ĐỘNG ({len(rr['hybrid_goc'])})", ",".join(rr['hybrid_goc']), height=100)
 
                         if target in kq_db:
@@ -715,22 +796,22 @@ def main():
                             with c_r3:
                                 if real in rr['hybrid_goc']: st.success("Hybrid: WIN")
                                 else: st.error("Hybrid: MISS")
-# ===== DAY SIGNAL & WARNING (MODULE) =====
                             pa2.render_pa2_preanalysis(
                                 res_curr=res_curr,
                                 res_hc=res_hc,
                                 hybrid_goc=hybrid_goc,
-)
-            # --- TAB 2: BACKTEST (SINGLE MODE) ---
+                            )
+            # --- TAB 2: BACKTEST ---
             with tab2:
-                st.subheader("🔙 Backtest Chi Tiết (Single Mode)")
+                st.subheader("🔙 Backtest Chi Tiết")
                 
                 c_bt_1, c_bt_2 = st.columns([1, 2])
                 with c_bt_1:
                     cfg_options = ["Màn hình hiện tại"] + list(SCORES_PRESETS.keys()) + ["Gốc 3 (Test Input 75/Target 70)", "⚔️ Hybrid: HC(Gốc) + CH1(Gốc)"]
                     selected_cfg = st.selectbox("Chọn Cấu Hình Backtest:", cfg_options)
                     st.write("---")
-                    use_adaptive_bt = st.checkbox("🧠 Bật M Động (Adaptive)", value=False)
+                    use_auto_bt = st.checkbox("🤖 Auto-Calibration (Tự động điểm)", value=USE_AUTO_WEIGHTS)
+                    lookback_bt = st.number_input("Lookback Backtest:", min_value=3, value=10)
                 
                 with c_bt_2:
                     d_start = st.date_input("Từ ngày:", value=last_d - timedelta(days=10), key="bt_d1")
@@ -751,12 +832,17 @@ def main():
                             real_kq = kq_db[d]
                             row = {"Ngày": d.strftime("%d/%m"), "KQ": real_kq}
                             
+                            # Xử lý Logic Auto/Thường
+                            run_s = {}; run_m = {}; run_l = {}; run_r = 10; is_goc3 = False
+                            
                             if selected_cfg == "⚔️ Hybrid: HC(Gốc) + CH1(Gốc)":
                                 s_hc, m_hc, l_hc, r_hc = get_preset_params("Hard Core (Gốc)")
                                 s_ch1, m_ch1, l_ch1, r_ch1 = get_preset_params("CH1: Bám Đuôi (Gốc)")
-                                if use_adaptive_bt:
-                                    s_hc = get_adaptive_weights(d, s_hc, data_cache, kq_db, 3, 1.5)
-                                    s_ch1 = get_adaptive_weights(d, s_ch1, data_cache, kq_db, 3, 1.5)
+                                # Auto cho Hybrid
+                                if use_auto_bt:
+                                    auto_w = calculate_auto_weights_from_data(d, data_cache, kq_db, lookback_bt)
+                                    s_hc = auto_w; s_ch1 = auto_w
+                                
                                 res_hc = calculate_v24_logic_only(d, r_hc, data_cache, kq_db, l_hc, MIN_VOTES, s_hc, m_hc, USE_INVERSE, None, max_trim=MAX_TRIM_NUMS)
                                 res_ch1 = calculate_v24_logic_only(d, r_ch1, data_cache, kq_db, l_ch1, MIN_VOTES, s_ch1, m_ch1, USE_INVERSE, None, max_trim=MAX_TRIM_NUMS)
                                 if res_hc and res_ch1:
@@ -764,34 +850,35 @@ def main():
                                     fin_hyb = sorted(list(set(fin_hc).intersection(set(fin_ch1))))
                                     row.update({"HC Gốc": f"{check_win(real_kq, fin_hc)} ({len(fin_hc)})", "CH1 Gốc": f"{check_win(real_kq, fin_ch1)} ({len(fin_ch1)})", "Hybrid": f"{check_win(real_kq, fin_hyb)} ({len(fin_hyb)})"})
                                     logs.append(row)
+                                continue # Skip logic thường bên dưới
+
+                            if selected_cfg == "Màn hình hiện tại":
+                                run_s = {f'M{i}': st.session_state[f'std_{i}'] for i in range(11)}
+                                run_m = {f'M{i}': st.session_state[f'mod_{i}'] for i in range(11)}
+                                if STRATEGY_MODE == "🛡️ V24 Cổ Điển": run_l = {'l12': L_TOP_12, 'l34': L_TOP_34, 'l56': L_TOP_56, 'mod': LIMIT_MODIFIED}
+                                else: is_goc3 = True; inp = st.session_state.get('G3_INPUT', 75); tar = st.session_state.get('G3_TARGET', 70)
+                                run_r = ROLLING_WINDOW
+                            elif selected_cfg == "Gốc 3 (Test Input 75/Target 70)":
+                                is_goc3 = True; run_s = {f'M{i}': st.session_state[f'std_{i}'] for i in range(11)}; inp = 75; tar = 70; run_r = ROLLING_WINDOW
+                            elif selected_cfg in SCORES_PRESETS:
+                                run_s, run_m, run_l, run_r = get_preset_params(selected_cfg)
+                            
+                            # Nếu Auto bật -> Ghi đè
+                            if use_auto_bt:
+                                auto_w = calculate_auto_weights_from_data(d, data_cache, kq_db, lookback_bt)
+                                run_s = auto_w; run_m = auto_w
+                            
+                            if is_goc3:
+                                res = calculate_goc_3_logic(d, run_r, data_cache, kq_db, inp, tar, run_s, USE_INVERSE, MIN_VOTES)
+                                if res:
+                                    fin = res['dan_final']
+                                    row.update({"Gốc 3": f"{check_win(real_kq, fin)} ({len(fin)})", "Final": f"{check_win(real_kq, fin)} ({len(fin)})"})
+                                    logs.append(row)
                             else:
-                                run_s = {}; run_m = {}; run_l = {}; run_r = 10; is_goc3 = False
-                                if selected_cfg == "Màn hình hiện tại":
-                                    run_s = {f'M{i}': st.session_state[f'std_{i}'] for i in range(11)}
-                                    run_m = {f'M{i}': st.session_state[f'mod_{i}'] for i in range(11)}
-                                    if STRATEGY_MODE == "🛡️ V24 Cổ Điển": run_l = {'l12': L_TOP_12, 'l34': L_TOP_34, 'l56': L_TOP_56, 'mod': LIMIT_MODIFIED}
-                                    else: is_goc3 = True; inp = st.session_state.get('G3_INPUT', 75); tar = st.session_state.get('G3_TARGET', 70)
-                                    run_r = ROLLING_WINDOW
-                                elif selected_cfg == "Gốc 3 (Test Input 75/Target 70)":
-                                    is_goc3 = True; run_s = {f'M{i}': st.session_state[f'std_{i}'] for i in range(11)}; inp = 75; tar = 70; run_r = ROLLING_WINDOW
-                                elif selected_cfg in SCORES_PRESETS:
-                                    run_s, run_m, run_l, run_r = get_preset_params(selected_cfg)
-                                
-                                if use_adaptive_bt:
-                                    run_s = get_adaptive_weights(d, run_s, data_cache, kq_db, 3, 1.5)
-                                    if not is_goc3: run_m = get_adaptive_weights(d, run_m, data_cache, kq_db, 3, 1.5)
-                                
-                                if is_goc3:
-                                    res = calculate_goc_3_logic(d, run_r, data_cache, kq_db, inp, tar, run_s, USE_INVERSE, MIN_VOTES)
-                                    if res:
-                                        fin = res['dan_final']
-                                        row.update({"Gốc 3": f"{check_win(real_kq, fin)} ({len(fin)})", "Final": f"{check_win(real_kq, fin)} ({len(fin)})"})
-                                        logs.append(row)
-                                else:
-                                    res = calculate_v24_logic_only(d, run_r, data_cache, kq_db, run_l, MIN_VOTES, run_s, run_m, USE_INVERSE, None, max_trim=MAX_TRIM_NUMS)
-                                    if res:
-                                        row.update({"Gốc": f"{check_win(real_kq, res['dan_goc'])} ({len(res['dan_goc'])})", "Mod": f"{check_win(real_kq, res['dan_mod'])} ({len(res['dan_mod'])})", "Final": f"{check_win(real_kq, res['dan_final'])} ({len(res['dan_final'])})"})
-                                        logs.append(row)
+                                res = calculate_v24_logic_only(d, run_r, data_cache, kq_db, run_l, MIN_VOTES, run_s, run_m, USE_INVERSE, None, max_trim=MAX_TRIM_NUMS)
+                                if res:
+                                    row.update({"Gốc": f"{check_win(real_kq, res['dan_goc'])} ({len(res['dan_goc'])})", "Mod": f"{check_win(real_kq, res['dan_mod'])} ({len(res['dan_mod'])})", "Final": f"{check_win(real_kq, res['dan_final'])} ({len(res['dan_final'])})"})
+                                    logs.append(row)
 
                         bar.empty()
                         if logs:
@@ -864,3 +951,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
