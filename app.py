@@ -15,14 +15,14 @@ import pa2_preanalysis_text as pa2
 # 1. CẤU HÌNH HỆ THỐNG & PRESETS
 # ==============================================================================
 st.set_page_config(
-    page_title="Quang Pro V62 - Dynamic Hybrid", 
+    page_title="Ly Thong V62 - Dynamic Hybrid", 
     page_icon="🛡️", 
     layout="wide",
     initial_sidebar_state="collapsed" 
 )
 
-st.title("🛡️ Quang Handsome: V62 Dynamic Hybrid")
-st.caption("🚀 Tính năng mới: Backtest Matrix (Theo Tab 3) | Auto-Calibration | Hybrid")
+st.title("🛡️ Lý Thị Thông: V62 Dynamic Hybrid")
+st.caption("🚀 Tính năng mới: Fix Backtest Matrix (Đã sửa lỗi định dạng) | Auto-Calibration")
 
 CONFIG_FILE = 'config.json'
 
@@ -122,55 +122,39 @@ def get_adaptive_weights(target_date, base_weights, data_cache, kq_db, window=3,
 
 # --- MỚI: Hàm Auto-Calibration (Phân M Tự động) ---
 def calculate_auto_weights_from_data(target_date, data_cache, kq_db, lookback=10):
-    """
-    Tự động tính điểm cho M0-M10 dựa trên Ranking hiệu suất N ngày qua.
-    Tạo biến động mạnh: Top 1 = 60 điểm, giảm dần xuống 0.
-    """
     m_performance = {i: 0 for i in range(11)} 
     check_date = target_date - timedelta(days=1)
     past_days = []
-    
-    # 1. Quét dữ liệu quá khứ theo lookback custom
     while len(past_days) < lookback:
         if check_date in data_cache and check_date in kq_db:
             past_days.append(check_date)
         check_date -= timedelta(days=1)
-        if (target_date - check_date).days > 60: break # Safety break
-        
+        if (target_date - check_date).days > 60: break 
     if not past_days:
-        return {f'M{i}': 10 for i in range(11)} # Fallback đều nhau
+        return {f'M{i}': 10 for i in range(11)} 
 
-    # 2. Đếm số lần trúng của từng M
     for d in past_days:
         real_kq = str(kq_db[d]).zfill(2)
         df = data_cache[d]['df']
         cols = [c for c in df.columns if re.match(r'^M\s*\d+', c) or c in ['M10', 'M 1 0']]
-        
         m_map = {}
         for c in cols:
             clean = c.replace(' ', '').replace('M', '')
             try: idx = int(clean); m_map[c] = idx
             except: pass
-            
         for c_name, m_idx in m_map.items():
-            # Gom toàn bộ số trong cột M đó của ngày d
             all_nums = []
             for val in df[c_name].dropna():
                 all_nums.extend(get_nums(val))
-            # Nếu KQ nằm trong đám số đó -> M đó được điểm
             if real_kq in all_nums:
                 m_performance[m_idx] += 1
 
-    # 3. Xếp hạng & Gán điểm (Ranking Distribution)
     sorted_m = sorted(m_performance.items(), key=lambda x: x[1], reverse=True)
-    # Thang điểm "Gắt" để tạo biến động
     ranking_scores = [60, 50, 40, 30, 25, 20, 15, 10, 5, 0, 0]
-    
     final_weights = {}
     for rank, (m_idx, count) in enumerate(sorted_m):
         score = ranking_scores[rank] if rank < len(ranking_scores) else 0
         final_weights[f'M{m_idx}'] = score
-        
     return final_weights
 
 def parse_date_smart(col_str, f_m, f_y):
@@ -833,12 +817,10 @@ def main():
 
                         # -- CHUẨN BỊ CHO BACKTEST MATRIX --
                         if selected_cfg == "💎 Chiến thuật Matrix (Theo Tab 3)":
-                            # Lấy setting từ Tab 3 (Session State keys)
                             mtx_mode = st.session_state.get("mtx_mode_key", "🔥 Mid-Range Focus (Săn M6-M9)")
                             mtx_cut = st.session_state.get("mtx_cut_key", 40)
                             mtx_skip = st.session_state.get("mtx_skip_key", 0)
                             
-                            # Define logic giống Tab 3
                             if "Săn M6-M9" in mtx_mode:
                                 cur_w = [0, 0, 0, 0, 0, 0, 30, 40, 50, 60, 0]
                                 top_n = 10; f_mode = 'score'
@@ -859,7 +841,7 @@ def main():
                             row = {"Ngày": d.strftime("%d/%m"), "KQ": real_kq}
 
                             # ----------------------------------------
-                            # LOGIC 1: BACKTEST MATRIX
+                            # LOGIC 1: BACKTEST MATRIX (FIXED)
                             # ----------------------------------------
                             if selected_cfg == "💎 Chiến thuật Matrix (Theo Tab 3)":
                                 if d in data_cache:
@@ -868,7 +850,9 @@ def main():
                                         inp_df = get_elite_members(df_t, top_n=top_n, sort_by=f_mode)
                                         rnk_nums = calculate_matrix_simple(inp_df, cur_w)
                                         s_idx = mtx_skip; e_idx = mtx_skip + mtx_cut
-                                        fin_set = [n for n, s in rnk_nums[s_idx:e_idx]]
+                                        # === FIX LỖI 100% LOSE TẠI ĐÂY ===
+                                        # Chuyển số nguyên (5) thành chuỗi ("05") trước khi so sánh
+                                        fin_set = [str(n).zfill(2) for n, score in rnk_nums[s_idx:e_idx]]
                                         fin_set.sort()
                                         row.update({"Matrix Result": f"{check_win(real_kq, fin_set)} ({len(fin_set)})"})
                                         logs.append(row)
