@@ -22,7 +22,7 @@ st.set_page_config(
 )
 
 st.title("🛡️ Quang Handsome: V62 Dynamic Hybrid")
-st.caption("🚀 Tính năng mới: Auto-Calibration (Tự động phân M mọi miền) | Hybrid | Backtest Đơn")
+st.caption("🚀 Tính năng mới: Backtest Matrix (Theo Tab 3) | Auto-Calibration | Hybrid")
 
 CONFIG_FILE = 'config.json'
 
@@ -85,7 +85,7 @@ def get_col_score(col_name, mapping_tuple):
             return score
     return 0
 
-# --- CŨ: Hàm Adaptive cũ (giữ nguyên để không lỗi) ---
+# --- CŨ: Hàm Adaptive cũ (giữ nguyên) ---
 def get_adaptive_weights(target_date, base_weights, data_cache, kq_db, window=3, factor=1.5):
     m_hits = {i: 0 for i in range(11)}
     m_total = {i: 0 for i in range(11)}
@@ -807,11 +807,16 @@ def main():
                 
                 c_bt_1, c_bt_2 = st.columns([1, 2])
                 with c_bt_1:
-                    cfg_options = ["Màn hình hiện tại"] + list(SCORES_PRESETS.keys()) + ["Gốc 3 (Test Input 75/Target 70)", "⚔️ Hybrid: HC(Gốc) + CH1(Gốc)"]
+                    cfg_options = ["Màn hình hiện tại"] + list(SCORES_PRESETS.keys()) + ["Gốc 3 (Test Input 75/Target 70)", "⚔️ Hybrid: HC(Gốc) + CH1(Gốc)", "💎 Chiến thuật Matrix (Theo Tab 3)"]
                     selected_cfg = st.selectbox("Chọn Cấu Hình Backtest:", cfg_options)
                     st.write("---")
-                    use_auto_bt = st.checkbox("🤖 Auto-Calibration (Tự động điểm)", value=USE_AUTO_WEIGHTS)
-                    lookback_bt = st.number_input("Lookback Backtest:", min_value=3, value=10)
+                    
+                    if selected_cfg == "💎 Chiến thuật Matrix (Theo Tab 3)":
+                        st.info("ℹ️ Sẽ lấy cài đặt (Mode, Lấy, Bỏ) từ Tab 3.")
+                        use_auto_bt = False
+                    else:
+                        use_auto_bt = st.checkbox("🤖 Auto-Calibration (Tự động điểm)", value=USE_AUTO_WEIGHTS)
+                        lookback_bt = st.number_input("Lookback Backtest:", min_value=3, value=10)
                 
                 with c_bt_2:
                     d_start = st.date_input("Từ ngày:", value=last_d - timedelta(days=10), key="bt_d1")
@@ -826,19 +831,58 @@ def main():
                         
                         def check_win(kq, arr): return "✅" if kq in arr else "❌"
 
+                        # -- CHUẨN BỊ CHO BACKTEST MATRIX --
+                        if selected_cfg == "💎 Chiến thuật Matrix (Theo Tab 3)":
+                            # Lấy setting từ Tab 3 (Session State keys)
+                            mtx_mode = st.session_state.get("mtx_mode_key", "🔥 Mid-Range Focus (Săn M6-M9)")
+                            mtx_cut = st.session_state.get("mtx_cut_key", 40)
+                            mtx_skip = st.session_state.get("mtx_skip_key", 0)
+                            
+                            # Define logic giống Tab 3
+                            if "Săn M6-M9" in mtx_mode:
+                                cur_w = [0, 0, 0, 0, 0, 0, 30, 40, 50, 60, 0]
+                                top_n = 10; f_mode = 'score'
+                            elif "Thủ M10" in mtx_mode:
+                                cur_w = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 60]
+                                top_n = 20; f_mode = 'score'
+                            elif "Elite 5" in mtx_mode:
+                                cur_w = [0, 0, 5, 10, 15, 25, 30, 35, 40, 50, 60]
+                                top_n = 5; f_mode = 'score'
+                            else: # Top 10 File
+                                cur_w = [0, 0, 5, 10, 15, 25, 30, 35, 40, 50, 60]
+                                top_n = 10; f_mode = 'stt'
+
                         for idx, d in enumerate(dates_range):
                             bar.progress((idx + 1) / len(dates_range))
                             if d not in kq_db: continue
                             real_kq = kq_db[d]
                             row = {"Ngày": d.strftime("%d/%m"), "KQ": real_kq}
+
+                            # ----------------------------------------
+                            # LOGIC 1: BACKTEST MATRIX
+                            # ----------------------------------------
+                            if selected_cfg == "💎 Chiến thuật Matrix (Theo Tab 3)":
+                                if d in data_cache:
+                                    df_t = data_cache[d]['df']
+                                    try:
+                                        inp_df = get_elite_members(df_t, top_n=top_n, sort_by=f_mode)
+                                        rnk_nums = calculate_matrix_simple(inp_df, cur_w)
+                                        s_idx = mtx_skip; e_idx = mtx_skip + mtx_cut
+                                        fin_set = [n for n, s in rnk_nums[s_idx:e_idx]]
+                                        fin_set.sort()
+                                        row.update({"Matrix Result": f"{check_win(real_kq, fin_set)} ({len(fin_set)})"})
+                                        logs.append(row)
+                                    except: pass
+                                continue
                             
-                            # Xử lý Logic Auto/Thường
+                            # ----------------------------------------
+                            # LOGIC 2: BACKTEST V24/HYBRID THƯỜNG
+                            # ----------------------------------------
                             run_s = {}; run_m = {}; run_l = {}; run_r = 10; is_goc3 = False
                             
                             if selected_cfg == "⚔️ Hybrid: HC(Gốc) + CH1(Gốc)":
                                 s_hc, m_hc, l_hc, r_hc = get_preset_params("Hard Core (Gốc)")
                                 s_ch1, m_ch1, l_ch1, r_ch1 = get_preset_params("CH1: Bám Đuôi (Gốc)")
-                                # Auto cho Hybrid
                                 if use_auto_bt:
                                     auto_w = calculate_auto_weights_from_data(d, data_cache, kq_db, lookback_bt)
                                     s_hc = auto_w; s_ch1 = auto_w
@@ -850,7 +894,7 @@ def main():
                                     fin_hyb = sorted(list(set(fin_hc).intersection(set(fin_ch1))))
                                     row.update({"HC Gốc": f"{check_win(real_kq, fin_hc)} ({len(fin_hc)})", "CH1 Gốc": f"{check_win(real_kq, fin_ch1)} ({len(fin_ch1)})", "Hybrid": f"{check_win(real_kq, fin_hyb)} ({len(fin_hyb)})"})
                                     logs.append(row)
-                                continue # Skip logic thường bên dưới
+                                continue
 
                             if selected_cfg == "Màn hình hiện tại":
                                 run_s = {f'M{i}': st.session_state[f'std_{i}'] for i in range(11)}
@@ -894,13 +938,14 @@ def main():
                                 with st_cols[i]:
                                     st.metric(f"{c_name}", f"{wins}/{len(df_log)} ({wins/len(df_log)*100:.1f}%)", f"TB: {avg_size:.1f}")
 
-            # --- TAB 3: MATRIX (GIỮ NGUYÊN) ---
+            # --- TAB 3: MATRIX (GIỮ NGUYÊN - CẬP NHẬT KEY CHO BACKTEST) ---
             with tab3:
                 st.subheader("🎯 MA TRẬN CHIẾN LƯỢC: QUANT HUNTER")
                 with st.container(border=True):
                     c1, c2, c3 = st.columns([1.5, 1.5, 1])
                     with c1:
-                        strategy_mode = st.selectbox("⚔️ Chọn Chiến Thuật:", ["🔥 Mid-Range Focus (Săn M6-M9)", "🛡️ Storm Shelter (Thủ M10 Only)", "💎 Elite 5 (Vip Mode)", "👥 Đại Trà (Top 10 File)"], index=0)
+                        # Thêm key để Tab 2 đọc được
+                        strategy_mode = st.selectbox("⚔️ Chọn Chiến Thuật:", ["🔥 Mid-Range Focus (Săn M6-M9)", "🛡️ Storm Shelter (Thủ M10 Only)", "💎 Elite 5 (Vip Mode)", "👥 Đại Trà (Top 10 File)"], index=0, key="mtx_mode_key")
                     with c2:
                         if "Săn M6-M9" in strategy_mode:
                             current_weights = [0, 0, 0, 0, 0, 0, 30, 40, 50, 60, 0]
@@ -919,8 +964,9 @@ def main():
                             top_n_select = 10; filter_mode = 'stt'; def_cut = 65; def_skip = 0
                             st.info("🔹 Top 10 File")
                     with c3:
-                        cut_val = st.number_input("✂️ Lấy:", value=def_cut, step=5)
-                        skip_val = st.number_input("🚫 Bỏ:", value=def_skip, step=5)
+                        # Thêm key để Tab 2 đọc được
+                        cut_val = st.number_input("✂️ Lấy:", value=def_cut, step=5, key="mtx_cut_key")
+                        skip_val = st.number_input("🚫 Bỏ:", value=def_skip, step=5, key="mtx_skip_key")
                         target_matrix_date = st.date_input("Chọn ngày soi:", value=last_d, key="matrix_date")
                         btn_scan = st.button("🚀 QUÉT SỐ", type="primary", use_container_width=True)
 
