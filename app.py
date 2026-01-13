@@ -305,7 +305,7 @@ def load_data_v24(files):
                 cache[t_date] = {'df': df, 'hist_map': hist_map}
         except Exception as e: err_logs.append(f"Lỗi '{file.name}': {str(e)}"); continue
     return cache, kq_db, file_status, err_logs
-    def fast_get_top_nums(df, p_map_dict, s_map_dict, top_n, min_v, inverse):
+def fast_get_top_nums(df, p_map_dict, s_map_dict, top_n, min_v, inverse):
     cols_in_scope = sorted(list(set(p_map_dict.keys()) | set(s_map_dict.keys())))
     valid_cols = [c for c in cols_in_scope if c in df.columns]
     if not valid_cols or df.empty: return []
@@ -951,4 +951,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
