@@ -22,7 +22,7 @@ st.set_page_config(
 )
 
 st.title("🛡️ Lý Thị Thông: V62 Dynamic Hybrid")
-st.caption("🚀 Update: Chế độ Vote 8x (Core V24 - Nguồn 8X - Ưu tiên Vote)")
+st.caption("🚀 Update: Chế độ V24 Vote 8x (Khung V24 - Nguồn 8X - Xếp Vote)")
 
 CONFIG_FILE = 'config.json'
 
@@ -198,31 +198,26 @@ def find_header_row(df_preview):
         if any(k in row_str for k in keywords): return idx
     return 3
 
-# --- HÀM 1: CẬP NHẬT LOGIC SORT (CÓ HỖ TRỢ SORT BY VOTE) ---
+# --- HÀM 1: CẬP NHẬT LOGIC SORT (SORT BY VOTE NẾU CẦN) ---
 def fast_get_top_nums(df, p_map_dict, s_map_dict, top_n, min_v, inverse, sort_by_vote=False):
-    # 1. Lọc cột hợp lệ
     cols_in_scope = sorted(list(set(p_map_dict.keys()) | set(s_map_dict.keys())))
     valid_cols = [c for c in cols_in_scope if c in df.columns]
     
     if not valid_cols or df.empty: return []
 
-    # 2. Xử lý dữ liệu (Melt) để đếm số
     sub_df = df[valid_cols].copy()
     melted = sub_df.melt(ignore_index=False, var_name='Col', value_name='Val').dropna(subset=['Val'])
     
-    # Lọc bỏ từ khóa rác
     mask_valid = ~melted['Val'].astype(str).str.upper().str.contains(r'N|NGHI|SX|XIT|MISS|TRUOT|NGHỈ|LỖI', regex=True)
     melted = melted[mask_valid]
     
     if melted.empty: return []
 
-    # Tách số
     s_nums = melted['Val'].astype(str).str.findall(r'\d+')
     exploded = melted.assign(Num=s_nums).explode('Num').dropna(subset=['Num'])
     exploded['Num'] = exploded['Num'].str.strip().str.zfill(2)
     exploded = exploded[exploded['Num'].str.len() <= 2]
 
-    # 3. Tính Điểm (P, S) và Vote (V)
     exploded['P'] = exploded['Col'].map(p_map_dict).fillna(0)
     exploded['S'] = exploded['Col'].map(s_map_dict).fillna(0)
     
@@ -236,15 +231,15 @@ def fast_get_top_nums(df, p_map_dict, s_map_dict, top_n, min_v, inverse, sort_by
     stats = stats.reset_index()
     stats['Num_Int'] = stats['Num'].astype(int)
     
-    # 4. SẮP XẾP:
+    # LOGIC SORT QUAN TRỌNG:
     if sort_by_vote:
-        # 8X MODE: Ưu tiên VOTE cao nhất, sau đó mới đến điểm
+        # Nếu là Mode 8x -> Ưu tiên Vote -> Điểm
         if inverse: 
             stats = stats.sort_values(by=['V', 'P', 'Num_Int'], ascending=[True, True, True])
         else:
             stats = stats.sort_values(by=['V', 'P', 'Num_Int'], ascending=[False, False, True])
     else:
-        # V24 MODE: Ưu tiên ĐIỂM (P) cao nhất
+        # Nếu là Mode V24 Cổ điển -> Ưu tiên Điểm -> Vote
         if inverse: 
             stats = stats.sort_values(by=['P', 'S', 'Num_Int'], ascending=[True, True, True])
         else:
@@ -263,33 +258,32 @@ def smart_trim_by_score(number_list, df, p_map, s_map, target_size):
     exploded['Num'] = exploded['Num'].str.strip().str.zfill(2)
     exploded = exploded[exploded['Num'].isin(number_list)]
     
-    # Tính điểm để cắt
     exploded['Score'] = exploded['variable'].map(p_map).fillna(0) 
     
     final_scores = exploded.groupby('Num')['Score'].sum().reset_index()
     final_scores = final_scores.sort_values(by='Score', ascending=False)
     return sorted(final_scores.head(int(target_size))['Num'].tolist())
 
-# --- HÀM 2: CẬP NHẬT CORE LOGIC (V24 & VOTE 8X CHUNG KHUNG) ---
+# --- HÀM 2: CẬP NHẬT CORE LOGIC (V24 & VOTE 8X DÙNG CHUNG KHUNG) ---
 def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits_config, min_votes, score_std, score_mod, use_inverse, manual_groups=None, max_trim=None, strategy_mode="🛡️ V24 Cổ Điển"):
     if target_date not in _cache: return None
     curr_data = _cache[target_date]; df = curr_data['df']
     real_cols = df.columns
     p_map_dict = {}; s_map_dict = {}
 
+    # Cờ kiểm tra Mode
     is_8x_mode = (strategy_mode == "🛡️ V24 8x Vote")
     
-    # 1. XÁC ĐỊNH NGUỒN SỐ (DATA POOL) - ĐÂY LÀ CHỖ KHÁC BIỆT DUY NHẤT
+    # 1. XÁC ĐỊNH NGUỒN SỐ (DATA SOURCE)
     if is_8x_mode:
-        # Nếu là Vote 8x: Chỉ tìm cột 8X (hoặc DÀN) để lấy số
+        # Nếu là 8x Mode: Tìm cột 8X/DÀN
         col_8x = next((c for c in real_cols if re.match(r'^(8X|80|DÀN|DAN)$', c.strip().upper()) or '8X' in c.strip().upper()), None)
         if col_8x:
-            p_map_dict = {col_8x: 10} # Chỉ tính điểm cho cột 8x
+            p_map_dict = {col_8x: 10}
             s_map_dict = {col_8x: 10}
-        else:
-            return None # Không có cột 8x
+        else: return None
     else:
-        # Nếu là V24 Cổ điển: Lấy số từ M0-M10 theo cấu hình
+        # V24 Cổ điển: Lấy M0-M10
         score_std_tuple = tuple(score_std.items()); score_mod_tuple = tuple(score_mod.items())
         for col in real_cols:
             s_p = get_col_score(col, score_std_tuple)
@@ -297,7 +291,7 @@ def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits
             s_s = get_col_score(col, score_mod_tuple)
             if s_s > 0: s_map_dict[col] = s_s
 
-    # 2. XÁC ĐỊNH CỘT LỊCH SỬ (ĐỂ CHIA NHÓM 0x-9x) - GIỮ NGUYÊN LOGIC V24
+    # 2. XÁC ĐỊNH CỘT PHÂN NHÓM (LỊCH SỬ 0x-9x)
     prev_date = target_date - timedelta(days=1)
     if prev_date not in _cache:
         for i in range(2, 4):
@@ -309,7 +303,7 @@ def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits
 
     if not col_hist_used: return None 
 
-    # 3. CORE V24 ENGINE (TÌM TOP NHÓM TỪ QUÁ KHỨ)
+    # 3. BACKTEST TÌM TOP NHÓM (DÙNG KHUNG V24: Backtest cắt 80 số)
     groups = [f"{i}x" for i in range(10)]
     stats_std = {g: {'wins': 0, 'ranks': []} for g in groups}
     stats_mod = {g: {'wins': 0} for g in groups}
@@ -325,10 +319,10 @@ def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits
         for d in past_dates:
             d_df = _cache[d]['df']; kq = _kq_db[d]
             
-            # Setup map riêng cho ngày quá khứ
+            # Setup map cho ngày quá khứ
             d_p_map = {}; d_s_map = {}
             if is_8x_mode:
-                # Ngày xưa cũng phải lấy cột 8x để tính xem nhóm nào 8x ngon
+                # Tìm cột 8x trong quá khứ để lấy số đếm Vote
                 d_col_8x = next((c for c in d_df.columns if re.match(r'^(8X|80|DÀN|DAN)$', c.strip().upper()) or '8X' in c.strip().upper()), None)
                 if d_col_8x: d_p_map = {d_col_8x: 10}; d_s_map = {d_col_8x: 10}
             else:
@@ -349,17 +343,21 @@ def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits
             except: continue
             
             for g in groups:
+                # Lọc thành viên thuộc nhóm g (0x, 1x...)
                 mask = hist_series_d == g.upper()
                 mems = d_df[mask]
                 if mems.empty: stats_std[g]['ranks'].append(999); continue
                 
-                # CHÚ Ý: sort_by_vote=is_8x_mode
+                # --- CHỖ NÀY LÀ MẤU CHỐT ---
+                # Dù là V24 hay 8x Vote, Backtest luôn cắt 80 số để so sánh công bằng
+                # Nếu là 8x mode -> sort_by_vote=True
                 top80_std = fast_get_top_nums(mems, d_p_map, d_s_map, 80, min_votes, use_inverse, sort_by_vote=is_8x_mode)
                 
                 if kq in top80_std:
                     stats_std[g]['wins'] += 1; stats_std[g]['ranks'].append(top80_std.index(kq) + 1)
                 else: stats_std[g]['ranks'].append(999)
                 
+                # Mod cắt theo config mod như cũ
                 top86_mod = fast_get_top_nums(mems, d_s_map, d_p_map, int(limits_config['mod']), min_votes, use_inverse, sort_by_vote=is_8x_mode)
                 if kq in top86_mod: stats_mod[g]['wins'] += 1
 
@@ -372,7 +370,7 @@ def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits
         top6_std = [x[0] for x in final_std[:6]]
         best_mod_grp = sorted(stats_mod.keys(), key=lambda g: (-stats_mod[g]['wins'], g))[0]
 
-    # 4. FINAL CUT (LẤY SỐ TỪ TOP NHÓM)
+    # 4. FINAL CUT (LẤY SỐ CHO NGÀY HIỆN TẠI - ÁP DỤNG CẮT THEO L12, L34)
     hist_series = df[col_hist_used].astype(str).str.upper().replace('S', '6', regex=False)
     hist_series = hist_series.str.replace(r'[^0-9X]', '', regex=True)
     
@@ -381,7 +379,7 @@ def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits
         for g in group_list:
             mask = hist_series == g.upper(); valid_mems = df[mask]
             lim = limit_dict.get(g, limit_dict.get('default', 80))
-            # Lấy số từ cột nguồn (8x hoặc M) với thứ tự ưu tiên (Vote hoặc Score)
+            # sort_by_vote=is_8x_mode
             res = fast_get_top_nums(valid_mems, p_map_dict, s_map_dict, int(lim), min_votes, use_inverse, sort_by_vote=is_8x_mode)
             pool.extend(res)
         return pool
@@ -647,7 +645,7 @@ def main():
         STRATEGY_MODE = st.session_state['STRATEGY_MODE']
         
         if STRATEGY_MODE == "🛡️ V24 8x Vote":
-            st.warning("ℹ️ MODE 8X VOTE: Lấy số từ cột 8X/DÀN -> Ưu tiên Vote -> Cắt theo L12, L34, L56.")
+            st.warning("ℹ️ MODE 8X VOTE: Phân nhóm V24 -> Lấy nguồn 8X -> Sort theo Vote -> Cắt theo L12.")
         
         st.markdown("---")
 
