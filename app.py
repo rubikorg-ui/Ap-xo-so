@@ -22,7 +22,7 @@ st.set_page_config(
 )
 
 st.title("🛡️ Lý Thị Thông: V62 Dynamic Hybrid")
-st.caption("🚀 Update: V24 Vote 8x (Khung V24 - Nguồn 8X - Sort Vote - Chia Liên Minh)")
+st.caption("🚀 Update: V24 Vote 8x (Core V24 - Nguồn 8X - Sort Vote)")
 
 CONFIG_FILE = 'config.json'
 
@@ -238,7 +238,7 @@ def fast_get_top_nums(df, p_map_dict, s_map_dict, top_n, min_v, inverse, sort_by
     
     # 4. SẮP XẾP:
     if sort_by_vote:
-        # 8X MODE: Ưu tiên VOTE cao nhất (Số người trùng máu)
+        # 8X MODE: Ưu tiên VOTE cao nhất
         if inverse: 
             stats = stats.sort_values(by=['V', 'P', 'Num_Int'], ascending=[True, True, True])
         else:
@@ -270,7 +270,7 @@ def smart_trim_by_score(number_list, df, p_map, s_map, target_size):
     final_scores = final_scores.sort_values(by='Score', ascending=False)
     return sorted(final_scores.head(int(target_size))['Num'].tolist())
 
-# --- HÀM 2: CẬP NHẬT CORE LOGIC (VOTE 8X: BACKTEST 80 SỐ - GIAO THOA LIÊN MINH) ---
+# --- HÀM 2: CẬP NHẬT CORE LOGIC (VOTE 8X DÙNG LIÊN MINH V24) ---
 def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits_config, min_votes, score_std, score_mod, use_inverse, manual_groups=None, max_trim=None, strategy_mode="🛡️ V24 Cổ Điển"):
     if target_date not in _cache: return None
     curr_data = _cache[target_date]; df = curr_data['df']
@@ -308,7 +308,7 @@ def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits
 
     if not col_hist_used: return None 
 
-    # 3. BACKTEST TÌM TOP NHÓM (VẪN CẮT CỨNG 80 ĐỂ TÌM NHÓM MẠNH)
+    # 3. BACKTEST TÌM TOP NHÓM (GIỮ NGUYÊN V24)
     groups = [f"{i}x" for i in range(10)]
     stats_std = {g: {'wins': 0, 'ranks': []} for g in groups}
     stats_mod = {g: {'wins': 0} for g in groups}
@@ -327,7 +327,7 @@ def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits
             # Setup map cho ngày quá khứ
             d_p_map = {}; d_s_map = {}
             if is_8x_mode:
-                # Quá khứ cũng phải dùng cột 8x để check xem nhóm nào ăn 8x
+                # Tìm cột 8x trong quá khứ để đếm vote
                 d_col_8x = next((c for c in d_df.columns if re.match(r'^(8X|80|DÀN|DAN)$', c.strip().upper()) or '8X' in c.strip().upper()), None)
                 if d_col_8x: d_p_map = {d_col_8x: 10}; d_s_map = {d_col_8x: 10}
             else:
@@ -352,8 +352,8 @@ def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits
                 mems = d_df[mask]
                 if mems.empty: stats_std[g]['ranks'].append(999); continue
                 
-                # CHỖ NÀY QUAN TRỌNG: Backtest CẮT CỨNG 80 SỐ
-                # Để đánh giá công bằng tiềm năng của nhóm đó
+                # Backtest: Luôn cắt cứng 80 số để so sánh công bằng
+                # Sort theo Vote nếu là 8x mode
                 top80_std = fast_get_top_nums(mems, d_p_map, d_s_map, 80, min_votes, use_inverse, sort_by_vote=is_8x_mode)
                 
                 if kq in top80_std:
@@ -372,7 +372,7 @@ def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits
         top6_std = [x[0] for x in final_std[:6]]
         best_mod_grp = sorted(stats_mod.keys(), key=lambda g: (-stats_mod[g]['wins'], g))[0]
 
-    # 4. FINAL CUT (LẤY SỐ CHO HÔM NAY - ÁP DỤNG LIÊN MINH & CẮT THEO L12...)
+    # 4. FINAL CUT (CHIA LIÊN MINH V24 - GIỮ NGUYÊN GIAO THOA)
     hist_series = df[col_hist_used].astype(str).str.upper().replace('S', '6', regex=False)
     hist_series = hist_series.str.replace(r'[^0-9X]', '', regex=True)
     
@@ -380,11 +380,8 @@ def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits
         pool = []
         for g in group_list:
             mask = hist_series == g.upper(); valid_mems = df[mask]
-            
-            # Lấy số lượng cần cắt (L12, L34...) truyền vào
             lim = limit_dict.get(g, limit_dict.get('default', 80))
-            
-            # Cắt số theo đúng số lượng cài đặt, sort theo Vote (nếu 8x) hoặc Score
+            # Sort theo Vote nếu là 8x, Score nếu là V24
             res = fast_get_top_nums(valid_mems, p_map_dict, s_map_dict, int(lim), min_votes, use_inverse, sort_by_vote=is_8x_mode)
             pool.extend(res)
         return pool
@@ -395,29 +392,26 @@ def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits
         final_original = sorted(list(set(get_final_pool(manual_groups, limit_map))))
         final_modified = sorted(list(set(get_final_pool(manual_groups, {'default': limits_config['mod']}))))
     else:
-        # Cấu hình cắt số cho từng nhóm Top (L12 cho Top1,2 - L34 cho Top3,4 - L56 cho Top5,6)
+        # Cấu hình cắt số cho từng Rank
         limits_std = {
             top6_std[0]: limits_config['l12'], top6_std[1]: limits_config['l12'], 
             top6_std[2]: limits_config['l34'], top6_std[3]: limits_config['l34'], 
             top6_std[4]: limits_config['l56'], top6_std[5]: limits_config['l56']
         }
         
-        # --- LIÊN MINH 1: TOP 1, 6, 3 (Hoặc 1,5,3 tùy cấu hình, ở đây giữ nguyên code cũ) ---
+        # --- LIÊN MINH 1: Top 1, 6, 3 (Hoặc 1,5,3 tùy gốc) ---
         g_set1 = [top6_std[0], top6_std[5], top6_std[3]]
         pool1 = get_final_pool(g_set1, limits_std)
-        # Giao thoa nội bộ liên minh: Số xuất hiện >= 2 lần
         s1 = {n for n, c in Counter(pool1).items() if c >= 2} 
         
-        # --- LIÊN MINH 2: TOP 2, 4, 3 (Hoặc 2,4,6) ---
+        # --- LIÊN MINH 2: Top 2, 4, 3 ---
         g_set2 = [top6_std[1], top6_std[4], top6_std[2]]
         pool2 = get_final_pool(g_set2, limits_std)
-        # Giao thoa nội bộ liên minh: Số xuất hiện >= 2 lần
         s2 = {n for n, c in Counter(pool2).items() if c >= 2}
         
-        # --- GIAO THOA FINAL: Giữa 2 Liên Minh ---
+        # --- GIAO THOA FINAL ---
         final_original = sorted(list(s1.intersection(s2)))
         
-        # Dàn Mod (Giữ nguyên logic cũ)
         mask_mod = hist_series == best_mod_grp.upper()
         final_modified = sorted(fast_get_top_nums(df[mask_mod], s_map_dict, p_map_dict, int(limits_config['mod']), min_votes, use_inverse, sort_by_vote=is_8x_mode))
         
