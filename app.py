@@ -22,7 +22,7 @@ st.set_page_config(
 )
 
 st.title("🛡️ Lý Thị Thông: V62 Dynamic Hybrid")
-st.caption("🚀 Update: Chế độ V24 8x Vote (Ưu tiên Vote, Nguồn 8x) | Fix Backtest")
+st.caption("🚀 Update: Chế độ V24 8x Vote (Thuần Vote - Không lọc V24)")
 
 CONFIG_FILE = 'config.json'
 
@@ -236,15 +236,14 @@ def fast_get_top_nums(df, p_map_dict, s_map_dict, top_n, min_v, inverse, sort_by
     stats = stats.reset_index()
     stats['Num_Int'] = stats['Num'].astype(int)
     
-    # 4. SẮP XẾP (QUAN TRỌNG: FIX CHO 8X VOTE)
+    # 4. SẮP XẾP: NẾU LÀ 8X VOTE THÌ ƯU TIÊN VOTE TUYỆT ĐỐI
     if sort_by_vote:
-        # LOGIC 8X: Ưu tiên Vote (V) cao nhất -> Sau đó đến Điểm P
         if inverse: 
             stats = stats.sort_values(by=['V', 'P', 'Num_Int'], ascending=[True, True, True])
         else:
             stats = stats.sort_values(by=['V', 'P', 'Num_Int'], ascending=[False, False, True])
     else:
-        # LOGIC CỔ ĐIỂN: Ưu tiên Điểm (P) -> Vote (V)
+        # LOGIC CŨ CHO V24 CỔ ĐIỂN
         if inverse: 
             stats = stats.sort_values(by=['P', 'S', 'Num_Int'], ascending=[True, True, True])
         else:
@@ -252,25 +251,42 @@ def fast_get_top_nums(df, p_map_dict, s_map_dict, top_n, min_v, inverse, sort_by
         
     return stats['Num'].head(int(top_n)).tolist()
 
-# --- HÀM 2: CẬP NHẬT CORE LOGIC (TÁCH BIỆT 8X VÀ CỔ ĐIỂN) ---
+# --- HÀM 2: CẬP NHẬT CORE LOGIC (MODE 8X RIÊNG BIỆT) ---
 def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits_config, min_votes, score_std, score_mod, use_inverse, manual_groups=None, max_trim=None, strategy_mode="🛡️ V24 Cổ Điển"):
     if target_date not in _cache: return None
     curr_data = _cache[target_date]; df = curr_data['df']
     real_cols = df.columns
     p_map_dict = {}; s_map_dict = {}
 
-    # --- 1. XÁC ĐỊNH CHẾ ĐỘ VÀ CỘT DỮ LIỆU ---
     is_8x_mode = (strategy_mode == "🛡️ V24 8x Vote")
-    
+
+    # === LOGIC RIÊNG CHO 8X VOTE: KHÔNG LỌC ĐẦU, KHÔNG GIAO THOA ===
     if is_8x_mode:
-        # Tìm cột 8x/80/Dàn
+        # 1. Tìm cột 8x
         col_8x = next((c for c in real_cols if '8X' in c.upper() or '80' in c.upper() or 'DÀN' in c.upper() or 'DAN' in c.upper()), None)
         if col_8x:
+            # 2. Setup map giả để hàm fast_get_top_nums chạy được
             p_map_dict[col_8x] = 10; s_map_dict[col_8x] = 10
-        else:
-            # Fallback nếu không thấy cột 8x
-            is_8x_mode = False 
             
+            # 3. Lấy số lượng cần cắt từ ô L12 (ô đầu tiên trong bảng Limits)
+            limit_8x = limits_config.get('l12', 64)
+            if limit_8x == 0: limit_8x = 64 # Fallback
+            
+            # 4. GỌI HÀM LẤY SỐ TRỰC TIẾP TỪ CỘT 8X
+            # sort_by_vote=True -> Sẽ xếp theo Vote cao nhất -> Cắt lấy Top limit_8x
+            final_nums = fast_get_top_nums(df, p_map_dict, s_map_dict, int(limit_8x), min_votes, use_inverse, sort_by_vote=True)
+            
+            return {
+                "top6_std": ["8X"], "best_mod": "8X", 
+                "dan_goc": sorted(final_nums), "dan_mod": [], 
+                "dan_final": sorted(final_nums), 
+                "source_col": col_8x
+            }
+        else:
+            # Nếu không tìm thấy cột 8x -> Tự động quay về Mode Cổ Điển
+            is_8x_mode = False
+
+    # === LOGIC CŨ: V24 CỔ ĐIỂN (GIỮ NGUYÊN 100%) ===
     if not is_8x_mode:
         score_std_tuple = tuple(score_std.items()); score_mod_tuple = tuple(score_mod.items())
         for col in real_cols:
@@ -279,128 +295,114 @@ def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits
             s_s = get_col_score(col, score_mod_tuple)
             if s_s > 0: s_map_dict[col] = s_s
 
-    # --- 2. XÁC ĐỊNH CỘT LỊCH SỬ ---
-    prev_date = target_date - timedelta(days=1)
-    if prev_date not in _cache:
-        for i in range(2, 4):
-            if (target_date - timedelta(days=i)) in _cache: prev_date = target_date - timedelta(days=i); break
-    col_hist_used = curr_data['hist_map'].get(prev_date)
-    if not col_hist_used and prev_date in _cache: col_hist_used = _cache[prev_date]['hist_map'].get(prev_date)
-    if not col_hist_used: return None 
+        # Tìm nguồn lịch sử
+        prev_date = target_date - timedelta(days=1)
+        if prev_date not in _cache:
+            for i in range(2, 4):
+                if (target_date - timedelta(days=i)) in _cache: prev_date = target_date - timedelta(days=i); break
+        col_hist_used = curr_data['hist_map'].get(prev_date)
+        if not col_hist_used and prev_date in _cache: col_hist_used = _cache[prev_date]['hist_map'].get(prev_date)
+        if not col_hist_used: return None 
 
-    # --- 3. CHẠY V24 RANKING ---
-    groups = [f"{i}x" for i in range(10)]
-    stats_std = {g: {'wins': 0, 'ranks': []} for g in groups}
-    stats_mod = {g: {'wins': 0} for g in groups}
-    
-    if not manual_groups:
-        past_dates = []
-        check_d = target_date - timedelta(days=1)
-        while len(past_dates) < rolling_window:
-            if check_d in _cache and check_d in _kq_db: past_dates.append(check_d)
-            check_d -= timedelta(days=1)
-            if (target_date - check_d).days > 40: break
-            
-        for d in past_dates:
-            d_df = _cache[d]['df']; kq = _kq_db[d]
-            d_p_map = {}; d_s_map = {}
-            
-            if is_8x_mode:
-                d_col_8x = next((c for c in d_df.columns if '8X' in c.upper() or '80' in c.upper() or 'DÀN' in c.upper()), None)
-                if d_col_8x: d_p_map[d_col_8x] = 10; d_s_map[d_col_8x] = 10
-            else:
+        groups = [f"{i}x" for i in range(10)]
+        stats_std = {g: {'wins': 0, 'ranks': []} for g in groups}
+        stats_mod = {g: {'wins': 0} for g in groups}
+        
+        if not manual_groups:
+            past_dates = []
+            check_d = target_date - timedelta(days=1)
+            while len(past_dates) < rolling_window:
+                if check_d in _cache and check_d in _kq_db: past_dates.append(check_d)
+                check_d -= timedelta(days=1)
+                if (target_date - check_d).days > 40: break
+                
+            for d in past_dates:
+                d_df = _cache[d]['df']; kq = _kq_db[d]
+                d_p_map = {}; d_s_map = {}
                 for col in d_df.columns:
                     s_p = get_col_score(col, tuple(score_std.items()))
                     if s_p > 0: d_p_map[col] = s_p
                     s_s = get_col_score(col, tuple(score_mod.items()))
                     if s_s > 0: d_s_map[col] = s_s
-            
-            d_hist_col = None
-            sorted_dates = sorted([k for k in _cache[d]['hist_map'].keys() if k < d], reverse=True)
-            if sorted_dates: d_hist_col = _cache[d]['hist_map'][sorted_dates[0]]
-            if not d_hist_col: continue
-            
-            try:
-                hist_series_d = d_df[d_hist_col].astype(str).str.upper().replace('S', '6', regex=False)
-                hist_series_d = hist_series_d.str.replace(r'[^0-9X]', '', regex=True)
-            except: continue
-            
-            for g in groups:
-                mask = hist_series_d == g.upper()
-                mems = d_df[mask]
-                if mems.empty: stats_std[g]['ranks'].append(999); continue
                 
-                # Quét số: 8x mode dùng sort_by_vote=True
-                top80_std = fast_get_top_nums(mems, d_p_map, d_s_map, 80, min_votes, use_inverse, sort_by_vote=is_8x_mode)
+                d_hist_col = None
+                sorted_dates = sorted([k for k in _cache[d]['hist_map'].keys() if k < d], reverse=True)
+                if sorted_dates: d_hist_col = _cache[d]['hist_map'][sorted_dates[0]]
+                if not d_hist_col: continue
                 
-                if kq in top80_std:
-                    stats_std[g]['wins'] += 1; stats_std[g]['ranks'].append(top80_std.index(kq) + 1)
-                else: stats_std[g]['ranks'].append(999)
+                try:
+                    hist_series_d = d_df[d_hist_col].astype(str).str.upper().replace('S', '6', regex=False)
+                    hist_series_d = hist_series_d.str.replace(r'[^0-9X]', '', regex=True)
+                except: continue
                 
-                top86_mod = fast_get_top_nums(mems, d_s_map, d_p_map, int(limits_config['mod']), min_votes, use_inverse, sort_by_vote=is_8x_mode)
-                if kq in top86_mod: stats_mod[g]['wins'] += 1
+                for g in groups:
+                    mask = hist_series_d == g.upper()
+                    mems = d_df[mask]
+                    if mems.empty: stats_std[g]['ranks'].append(999); continue
+                    
+                    top80_std = fast_get_top_nums(mems, d_p_map, d_s_map, 80, min_votes, use_inverse, sort_by_vote=False)
+                    
+                    if kq in top80_std:
+                        stats_std[g]['wins'] += 1; stats_std[g]['ranks'].append(top80_std.index(kq) + 1)
+                    else: stats_std[g]['ranks'].append(999)
+                    
+                    top86_mod = fast_get_top_nums(mems, d_s_map, d_p_map, int(limits_config['mod']), min_votes, use_inverse, sort_by_vote=False)
+                    if kq in top86_mod: stats_mod[g]['wins'] += 1
 
-    top6_std = []; best_mod_grp = ""
-    if not manual_groups:
-        final_std = []
-        for g, inf in stats_std.items(): 
-            final_std.append((g, -inf['wins'], sum(inf['ranks']), sorted(inf['ranks'])))
-        final_std.sort(key=lambda x: (x[1], x[2], x[3], x[0])) 
-        top6_std = [x[0] for x in final_std[:6]]
-        best_mod_grp = sorted(stats_mod.keys(), key=lambda g: (-stats_mod[g]['wins'], g))[0]
+        top6_std = []; best_mod_grp = ""
+        if not manual_groups:
+            final_std = []
+            for g, inf in stats_std.items(): 
+                final_std.append((g, -inf['wins'], sum(inf['ranks']), sorted(inf['ranks'])))
+            final_std.sort(key=lambda x: (x[1], x[2], x[3], x[0])) 
+            top6_std = [x[0] for x in final_std[:6]]
+            best_mod_grp = sorted(stats_mod.keys(), key=lambda g: (-stats_mod[g]['wins'], g))[0]
 
-    # --- 4. LẤY SỐ CHO NGÀY HIỆN TẠI ---
-    hist_series = df[col_hist_used].astype(str).str.upper().replace('S', '6', regex=False)
-    hist_series = hist_series.str.replace(r'[^0-9X]', '', regex=True)
-    
-    def get_final_pool(group_list, limit_dict):
-        pool = []
-        for g in group_list:
-            mask = hist_series == g.upper(); valid_mems = df[mask]
-            lim = limit_dict.get(g, limit_dict.get('default', 80))
-            res = fast_get_top_nums(valid_mems, p_map_dict, s_map_dict, int(lim), min_votes, use_inverse, sort_by_vote=is_8x_mode)
-            pool.extend(res)
-        return pool
+        hist_series = df[col_hist_used].astype(str).str.upper().replace('S', '6', regex=False)
+        hist_series = hist_series.str.replace(r'[^0-9X]', '', regex=True)
         
-    final_original = []; final_modified = []
-    
-    if manual_groups:
-        limit_map = {'default': limits_config['l12']}
-        final_original = sorted(list(set(get_final_pool(manual_groups, limit_map))))
-        final_modified = sorted(list(set(get_final_pool(manual_groups, {'default': limits_config['mod']}))))
-    else:
-        limits_std = {
-            top6_std[0]: limits_config['l12'], top6_std[1]: limits_config['l12'], 
-            top6_std[2]: limits_config['l34'], top6_std[3]: limits_config['l34'], 
-            top6_std[4]: limits_config['l56'], top6_std[5]: limits_config['l56']
+        def get_final_pool(group_list, limit_dict):
+            pool = []
+            for g in group_list:
+                mask = hist_series == g.upper(); valid_mems = df[mask]
+                lim = limit_dict.get(g, limit_dict.get('default', 80))
+                res = fast_get_top_nums(valid_mems, p_map_dict, s_map_dict, int(lim), min_votes, use_inverse, sort_by_vote=False)
+                pool.extend(res)
+            return pool
+            
+        final_original = []; final_modified = []
+        if manual_groups:
+            limit_map = {'default': limits_config['l12']}
+            final_original = sorted(list(set(get_final_pool(manual_groups, limit_map))))
+            final_modified = sorted(list(set(get_final_pool(manual_groups, {'default': limits_config['mod']}))))
+        else:
+            limits_std = {
+                top6_std[0]: limits_config['l12'], top6_std[1]: limits_config['l12'], 
+                top6_std[2]: limits_config['l34'], top6_std[3]: limits_config['l34'], 
+                top6_std[4]: limits_config['l56'], top6_std[5]: limits_config['l56']
+            }
+            g_set1 = [top6_std[0], top6_std[5], top6_std[3]]
+            pool1 = get_final_pool(g_set1, limits_std)
+            s1 = {n for n, c in Counter(pool1).items() if c >= 2} 
+            g_set2 = [top6_std[1], top6_std[4], top6_std[2]]
+            pool2 = get_final_pool(g_set2, limits_std)
+            s2 = {n for n, c in Counter(pool2).items() if c >= 2}
+            final_original = sorted(list(s1.intersection(s2)))
+            mask_mod = hist_series == best_mod_grp.upper()
+            final_modified = sorted(fast_get_top_nums(df[mask_mod], s_map_dict, p_map_dict, int(limits_config['mod']), min_votes, use_inverse, sort_by_vote=False))
+            
+        intersect_list = list(set(final_original).intersection(set(final_modified)))
+        if max_trim and len(intersect_list) > max_trim:
+            temp_df = df.copy()
+            trimmed = smart_trim_by_score(intersect_list, temp_df, p_map_dict, s_map_dict, max_trim)
+            final_intersect = sorted(trimmed)
+        else: 
+            final_intersect = sorted(intersect_list)
+            
+        return {
+            "top6_std": top6_std, "best_mod": best_mod_grp, "dan_goc": final_original, 
+            "dan_mod": final_modified, "dan_final": final_intersect, "source_col": col_hist_used
         }
-        g_set1 = [top6_std[0], top6_std[5], top6_std[3]]
-        pool1 = get_final_pool(g_set1, limits_std)
-        s1 = {n for n, c in Counter(pool1).items() if c >= 2} 
-        
-        g_set2 = [top6_std[1], top6_std[4], top6_std[2]]
-        pool2 = get_final_pool(g_set2, limits_std)
-        s2 = {n for n, c in Counter(pool2).items() if c >= 2}
-        
-        final_original = sorted(list(s1.intersection(s2)))
-        
-        mask_mod = hist_series == best_mod_grp.upper()
-        final_modified = sorted(fast_get_top_nums(df[mask_mod], s_map_dict, p_map_dict, int(limits_config['mod']), min_votes, use_inverse, sort_by_vote=is_8x_mode))
-        
-    # --- 5. XỬ LÝ GIAO & TRIM ---
-    intersect_list = list(set(final_original).intersection(set(final_modified)))
-    
-    if max_trim and len(intersect_list) > max_trim:
-        temp_df = df.copy()
-        trimmed = smart_trim_by_score(intersect_list, temp_df, p_map_dict, s_map_dict, max_trim)
-        final_intersect = sorted(trimmed)
-    else: 
-        final_intersect = sorted(intersect_list)
-        
-    return {
-        "top6_std": top6_std, "best_mod": best_mod_grp, "dan_goc": final_original, 
-        "dan_mod": final_modified, "dan_final": final_intersect, "source_col": col_hist_used
-    }
 def smart_trim_by_score(number_list, df, p_map, s_map, target_size):
     if len(number_list) <= target_size: return sorted(number_list)
     temp_df = df.copy()
@@ -412,9 +414,8 @@ def smart_trim_by_score(number_list, df, p_map, s_map, target_size):
     exploded['Num'] = exploded['Num'].str.strip().str.zfill(2)
     exploded = exploded[exploded['Num'].isin(number_list)]
     
-    # Tính điểm để cắt
+    # Tính điểm để cắt (ưu tiên P_MAP là điểm chính hoặc Vote)
     exploded['Score'] = exploded['variable'].map(p_map).fillna(0) 
-    # Nếu cần thiết có thể cộng thêm s_map, nhưng ở đây ưu tiên P_MAP (Điểm chính/Vote)
     
     final_scores = exploded.groupby('Num')['Score'].sum().reset_index()
     final_scores = final_scores.sort_values(by='Score', ascending=False)
@@ -422,7 +423,7 @@ def smart_trim_by_score(number_list, df, p_map, s_map, target_size):
 
 def calculate_goc_3_logic(target_date, rolling_window, _cache, _kq_db, input_limit, target_limit, score_std, use_inverse, min_votes):
     dummy_lim = {'l12':1, 'l34':1, 'l56':1, 'mod':1}
-    # Gốc 3 luôn chạy trên nền tảng logic Cổ điển (M0-M10)
+    # Gốc 3 luôn chạy trên nền tảng logic Cổ điển (M0-M10) để tìm Top 3 đầu bảng
     res_v24 = calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, dummy_lim, min_votes, score_std, score_std, use_inverse, strategy_mode="🛡️ V24 Cổ Điển")
     if not res_v24: return None
     top3 = res_v24['top6_std'][:3]
@@ -452,7 +453,7 @@ def calculate_goc_3_logic(target_date, rolling_window, _cache, _kq_db, input_lim
 @st.cache_data(show_spinner=False)
 def calculate_v24_final(target_date, rolling_window, _cache, _kq_db, limits_config, min_votes, score_std, score_mod, use_inverse, manual_groups=None, max_trim=None, strategy_mode="🛡️ V24 Cổ Điển"):
     res = calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits_config, min_votes, score_std, score_mod, use_inverse, manual_groups, max_trim, strategy_mode)
-    if not res: return None, "Lỗi dữ liệu hoặc không tìm thấy nguồn"
+    if not res: return None, "Lỗi dữ liệu hoặc không tìm thấy cột 8X/Nguồn"
     return res, None
 
 def get_elite_members(df, top_n=10, sort_by='score'):
@@ -594,7 +595,7 @@ def load_data_v24(files):
     return cache, kq_db, file_status, err_logs
 
 # ==============================================================================
-# 3. GIAO DIỆN CHÍNH (MAIN APP) - FIXED
+# 3. GIAO DIỆN CHÍNH (MAIN APP) - FIXED UI
 # ==============================================================================
 
 def main():
@@ -644,7 +645,7 @@ def main():
         STRATEGY_MODE = st.session_state['STRATEGY_MODE']
         
         if STRATEGY_MODE == "🛡️ V24 8x Vote":
-            st.warning("ℹ️ 8X VOTE: Cần file có cột '8X', '80' hoặc 'DÀN'. Số có VOTE cao sẽ được ưu tiên.")
+            st.warning("ℹ️ 8X VOTE: Máy sẽ lấy TOÀN BỘ số trong cột 8X/DÀN -> Sắp xếp theo Vote -> Cắt theo số lượng ô L12.")
         
         st.markdown("---")
 
@@ -683,7 +684,15 @@ def main():
         st.markdown("---")
 
         # --- CẤU HÌNH ĐỘNG THEO CHẾ ĐỘ ---
-        if STRATEGY_MODE in ["🛡️ V24 Cổ Điển", "🛡️ V24 8x Vote"]:
+        if STRATEGY_MODE == "🛡️ V24 8x Vote":
+            with st.expander("✂️ Cắt Dàn 8X Vote", expanded=True):
+                st.caption("Chỉ dùng ô 'Lấy (Top 1...)' bên dưới để quy định số lượng:")
+                L_TOP_12 = st.number_input("Số lượng cần lấy (Ví dụ 64):", step=1, key="L12", value=64)
+                # Các ô khác vô hiệu hóa hoặc để 0
+                L_TOP_34=0; L_TOP_56=0; LIMIT_MODIFIED=0
+            MAX_TRIM_NUMS = st.slider("🛡️ Max Trim Final:", 50, 90, key="MAX_TRIM")
+            
+        elif STRATEGY_MODE == "🛡️ V24 Cổ Điển":
             with st.expander("✂️ Cắt Top V24", expanded=True):
                 L_TOP_12 = st.number_input("Top 1 & 2 lấy:", step=1, key="L12")
                 L_TOP_34 = st.number_input("Top 3 & 4 lấy:", step=1, key="L34")
