@@ -1,16 +1,20 @@
 # -*- coding: utf-8 -*-
+
 from collections import Counter
 from datetime import timedelta
 import re
 
 # =============================
-# CẤU HÌNH CHUNG
+# CONFIG (NO VIETNAMESE ACCENT)
 # =============================
-BAD_KEYWORDS = ['N', 'NGHI', 'SX', 'XIT', 'MISS', 'TRUOT', 'NGHỈ', 'LỖI']
+BAD_KEYWORDS = [
+    'N', 'NGHI', 'SX', 'XIT', 'MISS', 'TRUOT', 'LOI'
+]
 
-# =================================================
-# HÀM CẮT SỐ THEO VOTE (ƯU TIÊN VOTE → HC NẾU TRÙNG)
-# =================================================
+# =====================================================
+# GET TOP NUMS BY VOTE
+# PRIORITY: VOTE > HC (ONLY IF TIED AT CUT)
+# =====================================================
 def get_top_nums_by_vote_count(
     df_members,
     col_name,
@@ -24,14 +28,15 @@ def get_top_nums_by_vote_count(
     vals = df_members[col_name].dropna().astype(str).tolist()
 
     for val in vals:
-        if any(kw in val.upper() for kw in BAD_KEYWORDS):
+        val_up = val.upper()
+        if any(kw in val_up for kw in BAD_KEYWORDS):
             continue
-        found = re.findall(r'\d+', val)
+        found = re.findall(r'\d+', val_up)
         all_nums.extend([n.zfill(2) for n in found if len(n) <= 2])
 
     counts = Counter(all_nums)
 
-    # 1️⃣ Sort CHỈ theo vote
+    # 1. SORT BY VOTE ONLY
     sorted_by_vote = sorted(
         counts.items(),
         key=lambda x: -x[1]
@@ -40,7 +45,7 @@ def get_top_nums_by_vote_count(
     if len(sorted_by_vote) <= limit:
         return [n for n, _ in sorted_by_vote]
 
-    # 2️⃣ Lấy vote ngưỡng
+    # 2. FIND CUT VOTE
     cut_vote = sorted_by_vote[limit - 1][1]
 
     higher = [(n, v) for n, v in sorted_by_vote if v > cut_vote]
@@ -48,11 +53,11 @@ def get_top_nums_by_vote_count(
 
     slots_left = limit - len(higher)
 
-    # 3️⃣ Nếu không cần so điểm HC
+    # 3. NO NEED HC
     if len(equal) <= slots_left:
         result = higher + equal
     else:
-        # 4️⃣ Chỉ lúc này mới so điểm HC
+        # 4. HC TIE-BREAK ONLY HERE
         def tie_key(item):
             num = item[0]
             hc = hc_score_map.get(num, 0) if hc_score_map else 0
@@ -63,10 +68,9 @@ def get_top_nums_by_vote_count(
 
     return [n for n, _ in result]
 
-
-# =================================================
-# HÀM CHÍNH: CHIẾN THUẬT VOTE 8X
-# =================================================
+# =====================================================
+# MAIN STRATEGY: VOTE 8X
+# =====================================================
 def calculate_vote_8x_strategy(
     target_date,
     rolling_window,
@@ -76,20 +80,20 @@ def calculate_vote_8x_strategy(
     hc_score_map=None
 ):
     if target_date not in data_cache:
-        return None, "Không có dữ liệu ngày này"
+        return None, "NO DATA FOR THIS DATE"
 
     curr_data = data_cache[target_date]
     df = curr_data['df']
 
-    # 1️⃣ Tìm cột 8X
+    # 1. FIND 8X COLUMN
     col_8x = next(
         (c for c in df.columns if '8X' in c.upper()),
         None
     )
     if not col_8x:
-        return None, "Không tìm thấy cột 8X"
+        return None, "NO 8X COLUMN"
 
-    # 2️⃣ Tìm cột phân nhóm
+    # 2. FIND GROUP COLUMN
     col_group = None
     prev_date = target_date - timedelta(days=1)
 
@@ -100,9 +104,9 @@ def calculate_vote_8x_strategy(
         prev_date -= timedelta(days=1)
 
     if not col_group:
-        return None, "Không tìm thấy cột phân nhóm"
+        return None, "NO GROUP COLUMN"
 
-    # 3️⃣ BACKTEST chọn Top 6 nhóm
+    # 3. BACKTEST TO PICK TOP 6 GROUPS
     groups = [f"{i}x" for i in range(10)]
     stats = {g: {'wins': 0, 'ranks': []} for g in groups}
 
@@ -157,7 +161,7 @@ def calculate_vote_8x_strategy(
     final_rank.sort(key=lambda x: (x[1], x[2]))
     top6 = [x[0] for x in final_rank[:6]]
 
-    # 4️⃣ FINAL CUT
+    # 4. FINAL CUT
     hist_series = (
         df[col_group]
         .astype(str)
@@ -166,7 +170,7 @@ def calculate_vote_8x_strategy(
         .str.replace(r'[^0-9X]', '', regex=True)
     )
 
-    l_config = {
+    limit_map = {
         top6[0]: limits_config['l12'],
         top6[1]: limits_config['l12'],
         top6[2]: limits_config['l34'],
@@ -175,10 +179,10 @@ def calculate_vote_8x_strategy(
         top6[5]: limits_config['l56'],
     }
 
-    def get_pool(groups):
+    def get_pool(group_list):
         pool = []
-        for g in groups:
-            limit = l_config.get(g, 80)
+        for g in group_list:
+            limit = limit_map.get(g, 80)
             pool.extend(
                 get_top_nums_by_vote_count(
                     df[hist_series == g.upper()],
@@ -189,6 +193,7 @@ def calculate_vote_8x_strategy(
             )
         return {n for n, c in Counter(pool).items() if c >= 2}
 
+    # CROSS ALLIANCE (INTENTIONAL DESIGN)
     s1 = get_pool([top6[0], top6[4], top6[2]])
     s2 = get_pool([top6[1], top6[3], top6[5]])
 
