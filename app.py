@@ -491,7 +491,85 @@ def save_config(config_data):
 # ==============================================================================
 # 3. GIAO DIỆN CHÍNH (MAIN APP) - PHẦN 2
 # ==============================================================================
+
+def main():
+    uploaded_files = st.file_uploader("📂 Tải file CSV/Excel", type=['xlsx', 'csv'], accept_multiple_files=True)
+
+    # LOAD CONFIG
+    saved_cfg = load_config()
+    if 'std_0' not in st.session_state:
+        if saved_cfg:
+            source = saved_cfg
+            st.session_state['preset_choice'] = "Cấu hình đã lưu (Saved)"
+        else:
+            # Mặc định dùng Balanced
+            source = SCORES_PRESETS["Balanced (Khuyên dùng 2026)"]
+            source_flat = {}
+            for i in range(11):
+                source_flat[f'std_{i}'] = source['STD'][i]
+                source_flat[f'mod_{i}'] = source['MOD'][i]
+            source_flat['L12'] = source['LIMITS']['l12']
+            source_flat['L34'] = source['LIMITS']['l34']
+            source_flat['L56'] = source['LIMITS']['l56']
+            source_flat['LMOD'] = source['LIMITS']['mod']
+            source_flat['MAX_TRIM'] = 75 
+            source_flat['ROLLING_WINDOW'] = source.get('ROLLING', 10)
+            source_flat['MIN_VOTES'] = 1
+            source_flat['USE_INVERSE'] = False
+            source_flat['USE_ADAPTIVE'] = False
+            source_flat['STRATEGY_MODE'] = "🛡️ V24 Cổ Điển"
+            source_flat['G3_INPUT'] = 75
+            source_flat['G3_TARGET'] = 70
+            source_flat['V8X_TOP'] = 10
+            # source_flat['V8X_LIMIT'] = 65
+            source = source_flat
+        for k, v in source.items():
+            if k in ['STD', 'MOD', 'LIMITS']: continue 
+            st.session_state[k] = v
+
+    with st.sidebar:
+        st.header("⚙️ Cài đặt")
+        
+        # --- MASTER SWITCH ---
+        # Cập nhật thêm Vote 8x vào menu
+        modes = ["🛡️ V24 Cổ Điển", "⚔️ Gốc 3 Bá Đạo", "🗳️ Vote 8x Strategy"]
+        current_mode = st.session_state.get('STRATEGY_MODE', "🛡️ V24 Cổ Điển")
+        if current_mode not in modes: current_mode = "🛡️ V24 Cổ Điển"
+        
+        st.session_state['STRATEGY_MODE'] = st.radio(
+            "🎯 CHỌN CHIẾN THUẬT:",
+            modes,
+            index=modes.index(current_mode)
+        )
+        STRATEGY_MODE = st.session_state['STRATEGY_MODE']
+        st.markdown("---")
+
+        def update_scores():
+            choice = st.session_state.preset_choice
+            if choice == "Cấu hình đã lưu (Saved)":
+                cfg = load_config()
+                if cfg:
+                    for k, v in cfg.items(): st.session_state[k] = v
+            elif choice in SCORES_PRESETS:
+                vals = SCORES_PRESETS[choice]
+                for i in range(11):
+                    st.session_state[f'std_{i}'] = vals["STD"][i]
+                    st.session_state[f'mod_{i}'] = vals["MOD"][i]
+                if 'LIMITS' in vals:
+                    st.session_state['L12'] = vals['LIMITS']['l12']
+                    st.session_state['L34'] = vals['LIMITS']['l34']
+                    st.session_state['L56'] = vals['LIMITS']['l56']
+                    st.session_state['LMOD'] = vals['LIMITS']['mod']
+                if 'ROLLING' in vals:
+                    st.session_state['ROLLING_WINDOW'] = vals['ROLLING']
+
+        menu_ops = ["Cấu hình đã lưu (Saved)"] + list(SCORES_PRESETS.keys()) if os.path.exists(CONFIG_FILE) else list(SCORES_PRESETS.keys())
+        st.selectbox("📚 Chọn bộ mẫu:", options=menu_ops, index=1, key="preset_choice", on_change=update_scores)
+
+        ROLLING_WINDOW = st.number_input("Chu kỳ xét (Ngày)", min_value=1, key="ROLLING_WINDOW")
+        
         # --- CẤU HÌNH ĐỘNG THEO CHẾ ĐỘ ---
+        # SỬA: Cho phép Vote 8x dùng chung biến cấu hình với V24 Cổ Điển
         if STRATEGY_MODE == "🛡️ V24 Cổ Điển" or STRATEGY_MODE == "🗳️ Vote 8x Strategy":
             with st.expander(f"✂️ Cắt Top ({STRATEGY_MODE})", expanded=True):
                 # Lưu ý: Dùng st.session_state.get để giữ giá trị cũ nếu có
