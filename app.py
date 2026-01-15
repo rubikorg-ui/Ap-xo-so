@@ -24,7 +24,7 @@ st.set_page_config(
 )
 
 st.title("🛡️ Quang Handsome: V62 Dynamic Hybrid")
-st.caption("🚀 Tính năng mới: Hybrid thay đổi theo tinh chỉnh màn hình | Backtest Đơn | M Động | Vote 8x (L12-L34)")
+st.caption("🚀 Tính năng mới: Hybrid thay đổi theo tinh chỉnh màn hình | Backtest Đơn | M Động | Vote 8x (L12-L34-L56)")
 
 CONFIG_FILE = 'config.json'
 
@@ -491,86 +491,11 @@ def save_config(config_data):
 # ==============================================================================
 # 3. GIAO DIỆN CHÍNH (MAIN APP) - PHẦN 2
 # ==============================================================================
-
-def main():
-    uploaded_files = st.file_uploader("📂 Tải file CSV/Excel", type=['xlsx', 'csv'], accept_multiple_files=True)
-
-    # LOAD CONFIG
-    saved_cfg = load_config()
-    if 'std_0' not in st.session_state:
-        if saved_cfg:
-            source = saved_cfg
-            st.session_state['preset_choice'] = "Cấu hình đã lưu (Saved)"
-        else:
-            # Mặc định dùng Balanced
-            source = SCORES_PRESETS["Balanced (Khuyên dùng 2026)"]
-            source_flat = {}
-            for i in range(11):
-                source_flat[f'std_{i}'] = source['STD'][i]
-                source_flat[f'mod_{i}'] = source['MOD'][i]
-            source_flat['L12'] = source['LIMITS']['l12']
-            source_flat['L34'] = source['LIMITS']['l34']
-            source_flat['L56'] = source['LIMITS']['l56']
-            source_flat['LMOD'] = source['LIMITS']['mod']
-            source_flat['MAX_TRIM'] = 75 
-            source_flat['ROLLING_WINDOW'] = source.get('ROLLING', 10)
-            source_flat['MIN_VOTES'] = 1
-            source_flat['USE_INVERSE'] = False
-            source_flat['USE_ADAPTIVE'] = False
-            source_flat['STRATEGY_MODE'] = "🛡️ V24 Cổ Điển"
-            source_flat['G3_INPUT'] = 75
-            source_flat['G3_TARGET'] = 70
-            source_flat['V8X_TOP'] = 10
-            # source_flat['V8X_LIMIT'] = 65 # Đã bỏ biến này vì dùng L12-L34
-            source = source_flat
-        for k, v in source.items():
-            if k in ['STD', 'MOD', 'LIMITS']: continue 
-            st.session_state[k] = v
-
-    with st.sidebar:
-        st.header("⚙️ Cài đặt")
-        
-        # --- MASTER SWITCH ---
-        # Cập nhật thêm Vote 8x vào menu
-        modes = ["🛡️ V24 Cổ Điển", "⚔️ Gốc 3 Bá Đạo", "🗳️ Vote 8x Strategy"]
-        current_mode = st.session_state.get('STRATEGY_MODE', "🛡️ V24 Cổ Điển")
-        if current_mode not in modes: current_mode = "🛡️ V24 Cổ Điển"
-        
-        st.session_state['STRATEGY_MODE'] = st.radio(
-            "🎯 CHỌN CHIẾN THUẬT:",
-            modes,
-            index=modes.index(current_mode)
-        )
-        STRATEGY_MODE = st.session_state['STRATEGY_MODE']
-        st.markdown("---")
-
-        def update_scores():
-            choice = st.session_state.preset_choice
-            if choice == "Cấu hình đã lưu (Saved)":
-                cfg = load_config()
-                if cfg:
-                    for k, v in cfg.items(): st.session_state[k] = v
-            elif choice in SCORES_PRESETS:
-                vals = SCORES_PRESETS[choice]
-                for i in range(11):
-                    st.session_state[f'std_{i}'] = vals["STD"][i]
-                    st.session_state[f'mod_{i}'] = vals["MOD"][i]
-                if 'LIMITS' in vals:
-                    st.session_state['L12'] = vals['LIMITS']['l12']
-                    st.session_state['L34'] = vals['LIMITS']['l34']
-                    st.session_state['L56'] = vals['LIMITS']['l56']
-                    st.session_state['LMOD'] = vals['LIMITS']['mod']
-                if 'ROLLING' in vals:
-                    st.session_state['ROLLING_WINDOW'] = vals['ROLLING']
-
-        menu_ops = ["Cấu hình đã lưu (Saved)"] + list(SCORES_PRESETS.keys()) if os.path.exists(CONFIG_FILE) else list(SCORES_PRESETS.keys())
-        st.selectbox("📚 Chọn bộ mẫu:", options=menu_ops, index=1, key="preset_choice", on_change=update_scores)
-
-        ROLLING_WINDOW = st.number_input("Chu kỳ xét (Ngày)", min_value=1, key="ROLLING_WINDOW")
         # --- CẤU HÌNH ĐỘNG THEO CHẾ ĐỘ ---
-        # SỬA: Cho phép Vote 8x dùng chung biến cấu hình với V24 Cổ Điển
+        # SỬA: Cho phép Vote 8x dùng chung biến cấu hình với V24 Cổ Điển để cắt L12/L34/L56
         if STRATEGY_MODE == "🛡️ V24 Cổ Điển" or STRATEGY_MODE == "🗳️ Vote 8x Strategy":
             with st.expander(f"✂️ Cắt Top ({STRATEGY_MODE})", expanded=True):
+                # Lưu ý: Dùng st.session_state.get để giữ giá trị cũ nếu có
                 L_TOP_12 = st.number_input("Top 1 & 2 lấy:", value=st.session_state.get('L12', 75), step=1, key="L12")
                 L_TOP_34 = st.number_input("Top 3 & 4 lấy:", value=st.session_state.get('L34', 70), step=1, key="L34")
                 L_TOP_56 = st.number_input("Top 5 & 6 lấy:", value=st.session_state.get('L56', 65), step=1, key="L56")
@@ -581,7 +506,7 @@ def main():
                 else:
                     LIMIT_MODIFIED = 0 # Vote 8x ignore cái này
             
-            # Vote 8x cần thêm config Top N (số lượng Top Group để xét)
+            # Vote 8x có thể cần thêm config Top N (số lượng Top Group để xét)
             if STRATEGY_MODE == "🗳️ Vote 8x Strategy":
                 V8X_TOP = st.number_input("Xét Top N Groups:", value=st.session_state.get('V8X_TOP', 10), key="V8X_TOP")
             
@@ -686,7 +611,7 @@ def main():
                         
                         else: # ==> 🗳️ Vote 8x Strategy
                             try:
-                                # Tạo dict limits từ giao diện
+                                # Tạo dict limits từ giao diện (CẮT L12/L34/L56)
                                 limits_v8x = {'l12': L_TOP_12, 'l34': L_TOP_34, 'l56': L_TOP_56}
                                 
                                 v8x_res = calculate_vote_8x_strategy(
@@ -703,11 +628,12 @@ def main():
                                         'dan_goc': v8x_res.get('dan_goc', []), 
                                         'dan_mod': [], 
                                         'dan_final': v8x_res.get('dan_final', []), 
-                                        'source_col': f"Vote 8x (L12:{L_TOP_12}, L34:{L_TOP_34})"
+                                        # SỬA: Hiển thị đủ thông số L56
+                                        'source_col': f"Vote 8x (L12:{L_TOP_12}, L34:{L_TOP_34}, L56:{L_TOP_56})"
                                     }
                                     err_curr = None
                                 else:
-                                    res_curr = None; err_curr = "Vote 8x không trả về kết quả (Thiếu dữ liệu)"
+                                    res_curr = None; err_curr = "Vote 8x không trả về kết quả (Thiếu dữ liệu hoặc lỗi)"
                             except Exception as e:
                                 import traceback
                                 traceback.print_exc()
@@ -774,13 +700,14 @@ def main():
                                 if real in rr['hybrid_goc']: st.success("Hybrid: WIN")
                                 else: st.error("Hybrid: MISS")
 
+                            # SỬA LỖI UnboundLocalError: Lấy biến từ session_state 'rr'
                             pa2.render_pa2_preanalysis(
-                                res_curr=res_curr,
-                                res_hc=res_hc,
-                                hybrid_goc=hybrid_goc,
+                                res_curr=rr['res_curr'],
+                                res_hc=rr['hc_goc'],
+                                hybrid_goc=rr['hybrid_goc'],
                             )
             
-            # --- TAB 2: BACKTEST (SỬA LỖI VOTE 8X) ---
+            # --- TAB 2: BACKTEST (ĐÃ SỬA CHO VOTE 8X) ---
             with tab2:
                 st.subheader("🔙 Backtest Chi Tiết (Single Mode)")
                 
@@ -810,6 +737,7 @@ def main():
                             real_kq = kq_db[d]
                             row = {"Ngày": d.strftime("%d/%m"), "KQ": real_kq}
                             
+                            # --- CASE: HYBRID BACKTEST ---
                             if selected_cfg == "⚔️ Hybrid: HC(Gốc) + CH1(Gốc)":
                                 s_hc, m_hc, l_hc, r_hc = get_preset_params("Hard Core (Gốc)")
                                 s_ch1, m_ch1, l_ch1, r_ch1 = get_preset_params("CH1: Bám Đuôi (Gốc)")
@@ -826,6 +754,7 @@ def main():
                             else:
                                 run_s = {}; run_m = {}; run_l = {}; run_r = 10; is_goc3 = False; is_vote8x = False
                                 
+                                # A. LẤY CẤU HÌNH TỪ UI HOẶC PRESET
                                 if selected_cfg == "Màn hình hiện tại":
                                     run_s = {f'M{i}': st.session_state[f'std_{i}'] for i in range(11)}
                                     run_m = {f'M{i}': st.session_state[f'mod_{i}'] for i in range(11)}
@@ -835,6 +764,7 @@ def main():
                                         is_goc3 = True; inp = st.session_state.get('G3_INPUT', 75); tar = st.session_state.get('G3_TARGET', 70)
                                     elif STRATEGY_MODE == "🗳️ Vote 8x Strategy":
                                         is_vote8x = True
+                                        # Lấy cấu hình cắt L12/L34/L56
                                         run_l = {'l12': L_TOP_12, 'l34': L_TOP_34, 'l56': L_TOP_56}
                                     else:
                                         run_l = {'l12': L_TOP_12, 'l34': L_TOP_34, 'l56': L_TOP_56, 'mod': LIMIT_MODIFIED}
@@ -844,19 +774,21 @@ def main():
                                 elif selected_cfg in SCORES_PRESETS:
                                     run_s, run_m, run_l, run_r = get_preset_params(selected_cfg)
                                 
+                                # B. ADAPTIVE
                                 if use_adaptive_bt:
                                     run_s = get_adaptive_weights(d, run_s, data_cache, kq_db, 3, 1.5)
                                     if not is_goc3 and not is_vote8x: run_m = get_adaptive_weights(d, run_m, data_cache, kq_db, 3, 1.5)
                                 
+                                # C. RUN LOGIC
                                 if is_vote8x:
-                                    # BACKTEST VOTE 8X
+                                    # BACKTEST VOTE 8X (CHẠY VỚI L12/L34)
                                     try:
                                         res_v8x = calculate_vote_8x_strategy(
                                             target_date=d,
                                             rolling_window=run_r,
                                             data_cache=data_cache,
                                             kq_db=kq_db,
-                                            limits_config=run_l,
+                                            limits_config=run_l, # Truyền cấu hình cắt
                                             top_n=st.session_state.get('V8X_TOP', 10),
                                             hc_score_map=run_s
                                         )
