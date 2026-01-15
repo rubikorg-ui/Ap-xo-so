@@ -10,11 +10,9 @@ from collections import Counter
 from functools import lru_cache
 import numpy as np
 import pa2_preanalysis_text as pa2
-# Import module Vote 8x
-from vote8x_strategy import calculate_vote_8x_strategy
 
 # ==============================================================================
-# 1. CẤU HÌNH HỆ THỐNG & PRESETS
+# 1. CẤU HÌNH & HẰNG SỐ
 # ==============================================================================
 st.set_page_config(
     page_title="Quang Pro V62 - Dynamic Hybrid", 
@@ -24,9 +22,14 @@ st.set_page_config(
 )
 
 st.title("🛡️ Quang Handsome: V62 Dynamic Hybrid")
-st.caption("🚀 Tính năng mới: Hybrid thay đổi theo tinh chỉnh màn hình | Backtest Đơn | M Động | Vote 8x (L12-L34-L56)")
+st.caption("🚀 All-in-One: Tích hợp Vote 8x (L12-34-56) & V24 & Gốc 3")
 
 CONFIG_FILE = 'config.json'
+BAD_KEYWORDS = frozenset(['N', 'NGHI', 'SX', 'XIT', 'MISS', 'TRUOT', 'NGHỈ', 'LỖI'])
+RE_NUMS = re.compile(r'\d+')
+RE_CLEAN_SCORE = re.compile(r'[^A-Z0-9]')
+RE_ISO_DATE = re.compile(r'(20\d{2})[\.\-/](\d{1,2})[\.\-/](\d{1,2})')
+RE_SLASH_DATE = re.compile(r'(\d{1,2})[\.\-/](\d{1,2})')
 
 SCORES_PRESETS = {
     "Balanced (Khuyên dùng 2026)": { 
@@ -35,45 +38,177 @@ SCORES_PRESETS = {
         "LIMITS": {'l12': 75, 'l34': 70, 'l56': 65, 'mod': 75},
         "ROLLING": 10
     },
-    "CH1 Fix (Siết chặt)": { 
-        "STD": [10, 20, 30, 30, 30, 30, 40, 40, 50, 50, 70], 
-        "MOD": [10, 20, 30, 30, 30, 30, 40, 40, 50, 50, 70],
-        "LIMITS": {'l12': 70, 'l34': 65, 'l56': 55, 'mod': 80},
-        "ROLLING": 10
-    },
     "Hard Core (Gốc)": { 
         "STD": [0, 0, 5, 10, 15, 25, 30, 35, 40, 50, 60], 
         "MOD": [0, 5, 10, 20, 25, 45, 50, 40, 30, 25, 40],
         "LIMITS": {'l12': 82, 'l34': 76, 'l56': 70, 'mod': 88},
         "ROLLING": 10
-    },
-    "CH1: Bám Đuôi (Gốc)": { 
-        "STD": [10, 20, 30, 30, 30, 30, 40, 40, 50, 50, 70], 
-        "MOD": [10, 20, 30, 30, 30, 30, 40, 40, 50, 50, 70],
-        "LIMITS": {'l12': 80, 'l34': 75, 'l56': 60, 'mod': 88},
-        "ROLLING": 10
     }
 }
 
-RE_NUMS = re.compile(r'\d+')
-RE_CLEAN_SCORE = re.compile(r'[^A-Z0-9]')
-RE_ISO_DATE = re.compile(r'(20\d{2})[\.\-/](\d{1,2})[\.\-/](\d{1,2})')
-RE_SLASH_DATE = re.compile(r'(\d{1,2})[\.\-/](\d{1,2})')
-BAD_KEYWORDS = frozenset(['N', 'NGHI', 'SX', 'XIT', 'MISS', 'TRUOT', 'NGHỈ', 'LỖI'])
+# ==============================================================================
+# 2. LOGIC VOTE 8X (ĐÃ TÍCH HỢP TRỰC TIẾP & SỬA LỖI TÌM CỘT)
+# ==============================================================================
+
+def find_group_column_smart(df, target_prev_date):
+    """Tìm cột ngày tháng (Group) thông minh, chấp nhận mọi định dạng."""
+    day, month = target_prev_date.day, target_prev_date.month
+    patterns = [
+        f"{day}/{month:02d}", f"{day}/{month}", 
+        f"{day}-{month:02d}", f"{day}.{month:02d}", 
+        f"{day:02d}/{month:02d}"
+    ]
+    for col in df.columns:
+        c_str = str(col).strip().upper()
+        if "8X" in c_str or "KQ" in c_str or "MEMBER" in c_str: continue
+        for pat in patterns:
+            if pat in c_str: return col
+    return None
+
+def get_v8x_nums(df_members, col_name, limit, hc_score_map=None):
+    """Lấy số Vote 8x, lọc rác và cắt theo Limit."""
+    if df_members.empty: return []
+    all_nums = []
+    vals = df_members[col_name].dropna().astype(str).tolist()
+    
+    for val in vals:
+        val_up = val.upper()
+        if not val_up or any(kw in val_up for kw in BAD_KEYWORDS): continue
+        found = re.findall(r'\d+', val_up)
+        for n in found:
+            clean_n = n.zfill(2)
+            if len(clean_n) > 2: clean_n = clean_n[-2:]
+            all_nums.append(clean_n)
+            
+    counts = Counter(all_nums)
+    sorted_by_vote = sorted(counts.items(), key=lambda x: -x[1])
+    
+    if not sorted_by_vote: return []
+    
+    try: limit = int(limit)
+    except: limit = 80
+    
+    if len(sorted_by_vote) <= limit:
+        return [n for n, _ in sorted_by_vote]
+        
+    cut_vote = sorted_by_vote[limit - 1][1]
+    higher = [(n, v) for n, v in sorted_by_vote if v > cut_vote]
+    equal = [(n, v) for n, v in sorted_by_vote if v == cut_vote]
+    slots_left = limit - len(higher)
+    
+    if len(equal) <= slots_left:
+        result = higher + equal
+    else:
+        def tie_key(item):
+            num = item[0]
+            hc = hc_score_map.get(num, 0) if hc_score_map else 0
+            return (-hc, int(num))
+        equal_sorted = sorted(equal, key=tie_key)
+        result = higher + equal_sorted[:slots_left]
+        
+    return [n for n, _ in result]
+
+def calculate_vote_8x_strategy(target_date, rolling_window, data_cache, kq_db, limits_config, top_n=10, hc_score_map=None, **kwargs):
+    if target_date not in data_cache: return None
+    curr_data = data_cache[target_date]; df = curr_data['df']
+
+    # 1. TÌM CỘT 8X (CỰC KỲ QUAN TRỌNG: TRÁNH CỘT ĐIỂM 'Đ')
+    col_8x = None
+    for c in df.columns:
+        c_up = str(c).strip().upper()
+        # Tìm chính xác "8X" hoặc "8X" có khoảng trắng, nhưng KHÔNG có chữ Đ đằng trước
+        if '8X' in c_up and 'Đ' not in c_up:
+            col_8x = c; break
+    if not col_8x: return None # Không có cột vote thì chịu
+
+    # 2. TÌM CỘT GROUP
+    prev_date = target_date - timedelta(days=1)
+    col_group = find_group_column_smart(df, prev_date)
+    if not col_group: 
+        col_group = find_group_column_smart(df, target_date - timedelta(days=2))
+    if not col_group: return None
+
+    # 3. BACKTEST GROUPS
+    groups = [f"{i}x" for i in range(10)]
+    stats = {g: {'wins': 0, 'ranks': []} for g in groups}
+    
+    past_dates = []
+    d = target_date - timedelta(days=1)
+    while len(past_dates) < rolling_window:
+        if d in data_cache and d in kq_db: past_dates.append(d)
+        d -= timedelta(days=1)
+        if (target_date - d).days > 60: break
+    
+    # Nếu không đủ ngày backtest, vẫn cố chạy với những ngày có được
+    if not past_dates: return None 
+
+    for d in past_dates:
+        d_df = data_cache[d]['df']; kq = kq_db[d]
+        
+        d_c8 = None
+        for c in d_df.columns:
+            if '8X' in str(c).strip().upper() and 'Đ' not in str(c).strip().upper(): d_c8 = c; break
+            
+        d_prev = d - timedelta(days=1)
+        d_grp_col = find_group_column_smart(d_df, d_prev)
+        
+        if not d_c8 or not d_grp_col: continue
+
+        try:
+            hist_series = d_df[d_grp_col].astype(str).str.upper().str.replace('S', '6').str.replace(r'[^0-9X]', '', regex=True)
+        except: continue
+
+        for g in groups:
+            mems = d_df[hist_series == g.upper()]
+            top80 = get_v8x_nums(mems, d_c8, 80, hc_score_map)
+            if kq in top80:
+                stats[g]['wins'] += 1; stats[g]['ranks'].append(top80.index(kq))
+            else:
+                stats[g]['ranks'].append(999)
+
+    final_rank = [(g, -v['wins'], sum(v['ranks'])) for g, v in stats.items()]
+    final_rank.sort(key=lambda x: (x[1], x[2]))
+    top6 = [x[0] for x in final_rank[:6]]
+
+    # 4. FINAL CUT
+    try:
+        hist_series = df[col_group].astype(str).str.upper().str.replace('S', '6').str.replace(r'[^0-9X]', '', regex=True)
+    except: return None
+
+    limit_map = {
+        top6[0]: limits_config.get('l12', 75), top6[1]: limits_config.get('l12', 75),
+        top6[2]: limits_config.get('l34', 70), top6[3]: limits_config.get('l34', 70),
+        top6[4]: limits_config.get('l56', 65), top6[5]: limits_config.get('l56', 65),
+    }
+
+    def get_pool(group_list):
+        pool = []
+        for g in group_list:
+            limit = limit_map.get(g, 80)
+            nums = get_v8x_nums(df[hist_series == g.upper()], col_8x, limit, hc_score_map)
+            pool.extend(nums)
+        return {n for n, c in Counter(pool).items() if c >= 2}
+
+    s1 = get_pool([top6[0], top6[4], top6[2]])
+    s2 = get_pool([top6[1], top6[3], top6[5]])
+    
+    return {
+        "top6_vote": top6,
+        "dan_goc": sorted(list(s1.union(s2))),
+        "dan_final": sorted(list(s1.intersection(s2))),
+        "source_col": col_group
+    }
 
 # ==============================================================================
-# 2. CORE FUNCTIONS
+# 3. CORE V24 FUNCTIONS (GIỮ NGUYÊN)
 # ==============================================================================
 
 @lru_cache(maxsize=10000)
 def get_nums(s):
     if pd.isna(s): return []
-    s_str = str(s).strip()
-    if not s_str: return []
-    s_upper = s_str.upper()
-    if any(kw in s_upper for kw in BAD_KEYWORDS): return []
-    raw_nums = RE_NUMS.findall(s_upper)
-    return [n.zfill(2) for n in raw_nums if len(n) <= 2]
+    s_str = str(s).strip().upper()
+    if not s_str or any(kw in s_str for kw in BAD_KEYWORDS): return []
+    return [n.zfill(2) for n in RE_NUMS.findall(s_str) if len(n) <= 2]
 
 @lru_cache(maxsize=1000)
 def get_col_score(col_name, mapping_tuple):
@@ -82,8 +217,7 @@ def get_col_score(col_name, mapping_tuple):
     if 'M10' in clean: return mapping.get('M10', 0)
     for key, score in mapping.items():
         if key in clean:
-            if key == 'M1' and 'M10' in clean: continue
-            if key == 'M0' and 'M10' in clean: continue
+            if key in ['M1', 'M0'] and 'M10' in clean: continue
             return score
     return 0
 
@@ -93,32 +227,27 @@ def get_adaptive_weights(target_date, base_weights, data_cache, kq_db, window=3,
     past_days = []
     check_d = target_date - timedelta(days=1)
     while len(past_days) < window:
-        if check_d in data_cache and check_d in kq_db:
-            past_days.append(check_d)
+        if check_d in data_cache and check_d in kq_db: past_days.append(check_d)
         check_d -= timedelta(days=1)
         if (target_date - check_d).days > 20: break 
     if not past_days: return base_weights 
     for d in past_days:
         kq = str(kq_db[d]).zfill(2)
         df = data_cache[d]['df']
-        m_cols = [c for c in df.columns if re.match(r'^M\s*\d+', c) or c in ['M10', 'M 1 0']]
-        m_map = {}
-        for c in m_cols:
-            clean = c.replace(' ', '').replace('M', '')
-            try: idx = int(clean); m_map[c] = idx
-            except: pass
         for _, row in df.iterrows():
             if 'KQ' in str(row.iloc[0]): continue
-            for col, w_idx in m_map.items():
-                m_total[w_idx] += 1
-                nums = get_nums(row[col])
-                if kq in nums: m_hits[w_idx] += 1
+            for col in df.columns:
+                if not re.match(r'^M\s*\d+', col) and col not in ['M10', 'M 1 0']: continue
+                clean = col.replace(' ', '').replace('M', '')
+                try: idx = int(clean)
+                except: continue
+                m_total[idx] += 1
+                if kq in get_nums(row[col]): m_hits[idx] += 1
     new_weights = {}
     for i, base_w in base_weights.items():
         idx = int(i.replace('M', ''))
         eff = m_hits[idx] / m_total[idx] if m_total[idx] > 0 else 0
-        adjusted_w = base_w * (1 + factor * eff)
-        new_weights[i] = round(adjusted_w, 1)
+        new_weights[i] = round(base_w * (1 + factor * eff), 1)
     return new_weights
 
 def parse_date_smart(col_str, f_m, f_y):
@@ -141,7 +270,6 @@ def parse_date_smart(col_str, f_m, f_y):
 
 def extract_meta_from_filename(filename):
     clean_name = filename.upper().replace(".CSV", "").replace(".XLSX", "")
-    clean_name = re.sub(r'\s*-\s*', '-', clean_name) 
     y_match = re.search(r'202[0-9]', clean_name)
     y_global = int(y_match.group(0)) if y_match else datetime.datetime.now().year
     m_match = re.search(r'(?:THANG|THÁNG|T)[^0-9]*(\d{1,2})', clean_name)
@@ -280,7 +408,6 @@ def fast_get_top_nums(df, p_map_dict, s_map_dict, top_n, min_v, inverse):
     else: stats = stats.sort_values(by=['P', 'V', 'Num_Int'], ascending=[False, False, True])
     return stats['Num'].head(int(top_n)).tolist()
 
-# --- V24 LOGIC ---
 def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits_config, min_votes, score_std, score_mod, use_inverse, manual_groups=None, max_trim=None):
     if target_date not in _cache: return None
     curr_data = _cache[target_date]; df = curr_data['df']
@@ -392,7 +519,6 @@ def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits
         "dan_mod": final_modified, "dan_final": final_intersect, "source_col": col_hist_used
     }
 
-# --- GỐC 3 LOGIC (CÓ SMART CUT) ---
 def smart_trim_by_score(number_list, df, p_map, s_map, target_size):
     if len(number_list) <= target_size: return sorted(number_list)
     temp_df = df.copy()
@@ -697,11 +823,11 @@ def main():
                                         'dan_goc': v8x_res.get('dan_goc', []), 
                                         'dan_mod': [], 
                                         'dan_final': v8x_res.get('dan_final', []), 
-                                        'source_col': f"Vote 8x (L12:{L_TOP_12}, L34:{L_TOP_34}, L56:{L_TOP_56})"
+                                        'source_col': f"Vote 8x (L12:{L_TOP_12}, L34:{L_TOP_34}, L56:{L_TOP_56}) - Nguồn: {v8x_res.get('source_col', '?')}"
                                     }
                                     err_curr = None
                                 else:
-                                    res_curr = None; err_curr = "Vote 8x không trả về kết quả (Thiếu dữ liệu hoặc lỗi)"
+                                    res_curr = None; err_curr = "Vote 8x không trả về kết quả (Thiếu dữ liệu hoặc lỗi tìm cột)"
                             except Exception as e:
                                 import traceback
                                 traceback.print_exc()
@@ -767,14 +893,13 @@ def main():
                                 if real in rr['hybrid_goc']: st.success("Hybrid: WIN")
                                 else: st.error("Hybrid: MISS")
 
-                            # Render PA2 using session state data
                             pa2.render_pa2_preanalysis(
                                 res_curr=rr['res_curr'],
                                 res_hc=rr['hc_goc'],
                                 hybrid_goc=rr['hybrid_goc'],
                             )
             
-            # --- TAB 2: BACKTEST (DEBUG MODE ENABLED) ---
+            # --- TAB 2: BACKTEST (ĐÃ NÂNG CẤP VOTE 8X DEBUG) ---
             with tab2:
                 st.subheader("🔙 Backtest Chi Tiết (Single Mode)")
                 
@@ -804,7 +929,6 @@ def main():
                             real_kq = kq_db[d]
                             row = {"Ngày": d.strftime("%d/%m"), "KQ": real_kq}
                             
-                            # Hybrid Backtest
                             if selected_cfg == "⚔️ Hybrid: HC(Gốc) + CH1(Gốc)":
                                 s_hc, m_hc, l_hc, r_hc = get_preset_params("Hard Core (Gốc)")
                                 s_ch1, m_ch1, l_ch1, r_ch1 = get_preset_params("CH1: Bám Đuôi (Gốc)")
@@ -821,7 +945,6 @@ def main():
                             else:
                                 run_s = {}; run_m = {}; run_l = {}; run_r = 10; is_goc3 = False; is_vote8x = False
                                 
-                                # Lấy cấu hình
                                 if selected_cfg == "Màn hình hiện tại":
                                     run_s = {f'M{i}': st.session_state[f'std_{i}'] for i in range(11)}
                                     run_m = {f'M{i}': st.session_state[f'mod_{i}'] for i in range(11)}
@@ -844,7 +967,7 @@ def main():
                                     run_s = get_adaptive_weights(d, run_s, data_cache, kq_db, 3, 1.5)
                                     if not is_goc3 and not is_vote8x: run_m = get_adaptive_weights(d, run_m, data_cache, kq_db, 3, 1.5)
                                 
-                                # Run Logic
+                                # LOGIC CHẠY BACKTEST
                                 if is_vote8x:
                                     try:
                                         res_v8x = calculate_vote_8x_strategy(
@@ -865,8 +988,9 @@ def main():
                                             })
                                             logs.append(row)
                                         else:
-                                            # Debugging info if needed
-                                            pass
+                                            # Bỏ qua ngày thiếu dữ liệu (tránh in lỗi quá nhiều)
+                                            # st.warning(f"Ngày {d}: Thiếu dữ liệu để backtest")
+                                            pass 
                                     except Exception as e:
                                         st.error(f"Lỗi ngày {d.strftime('%d/%m')}: {str(e)}")
 
