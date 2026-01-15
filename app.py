@@ -492,7 +492,6 @@ def save_config(config_data):
 # 3. GIAO DIỆN CHÍNH (MAIN APP) - PHẦN 2
 # ==============================================================================
         # --- CẤU HÌNH ĐỘNG THEO CHẾ ĐỘ ---
-        # SỬA: Cho phép Vote 8x dùng chung biến cấu hình với V24 Cổ Điển để cắt L12/L34/L56
         if STRATEGY_MODE == "🛡️ V24 Cổ Điển" or STRATEGY_MODE == "🗳️ Vote 8x Strategy":
             with st.expander(f"✂️ Cắt Top ({STRATEGY_MODE})", expanded=True):
                 # Lưu ý: Dùng st.session_state.get để giữ giá trị cũ nếu có
