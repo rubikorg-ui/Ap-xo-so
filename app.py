@@ -60,7 +60,7 @@ RE_SLASH_DATE = re.compile(r'(\d{1,2})[\.\-/](\d{1,2})')
 BAD_KEYWORDS = frozenset(['N', 'NGHI', 'SX', 'XIT', 'MISS', 'TRUOT', 'NGHỈ', 'LỖI'])
 
 # ==============================================================================
-# 2. CORE FUNCTIONS - TIỆN ÍCH & PARSING
+# 2. CORE FUNCTIONS
 # ==============================================================================
 
 @lru_cache(maxsize=10000)
@@ -211,6 +211,11 @@ def load_data_v24(files):
                     if c in seen: seen[c] += 1; final_cols.append(f"{c}.{seen[c]}")
                     else: seen[c] = 0; final_cols.append(c)
                 df.columns = final_cols
+                if not any(c.startswith('M') for c in final_cols):
+                    if h_row != 3:
+                        h_row = 3
+                        df = df_raw.iloc[h_row+1:].copy()
+                        df.columns = [str(c).strip().upper().replace('M 1 0', 'M10') for c in df_raw.iloc[h_row]]
                 dfs_to_process.append((date_from_name, df))
                 file_status.append(f"✅ CSV: {file.name}")
 
@@ -231,7 +236,7 @@ def load_data_v24(files):
                     if d_obj: hist_map[d_obj] = col
                 kq_row = None
                 if not df.empty:
-                    for c_idx in range(min(5, len(df.columns))):
+                    for c_idx in range(min(2, len(df.columns))):
                         col_check = df.columns[c_idx]
                         try:
                             mask_kq = df[col_check].astype(str).str.upper().str.contains(r'KQ|KẾT QUẢ')
@@ -246,10 +251,6 @@ def load_data_v24(files):
                 cache[t_date] = {'df': df, 'hist_map': hist_map}
         except Exception as e: err_logs.append(f"Lỗi '{file.name}': {str(e)}"); continue
     return cache, kq_db, file_status, err_logs
-
-# ==============================================================================
-# 3. CORE CALCULATION FUNCTIONS (V24, ALLIANCE 8X, GỐC 3)
-# ==============================================================================
 
 def fast_get_top_nums(df, p_map_dict, s_map_dict, top_n, min_v, inverse):
     cols_in_scope = sorted(list(set(p_map_dict.keys()) | set(s_map_dict.keys())))
@@ -277,6 +278,7 @@ def fast_get_top_nums(df, p_map_dict, s_map_dict, top_n, min_v, inverse):
     else: stats = stats.sort_values(by=['P', 'V', 'Num_Int'], ascending=[False, False, True])
     return stats['Num'].head(int(top_n)).tolist()
 
+# --- V24 LOGIC ---
 def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits_config, min_votes, score_std, score_mod, use_inverse, manual_groups=None, max_trim=None):
     if target_date not in _cache: return None
     curr_data = _cache[target_date]; df = curr_data['df']
@@ -288,24 +290,16 @@ def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits
         if s_p > 0: p_map_dict[col] = s_p
         s_s = get_col_score(col, score_mod_tuple)
         if s_s > 0: s_map_dict[col] = s_s
-    
     prev_date = target_date - timedelta(days=1)
     if prev_date not in _cache:
-        for i in range(2, 5):
+        for i in range(2, 4):
             if (target_date - timedelta(days=i)) in _cache: prev_date = target_date - timedelta(days=i); break
-    
     col_hist_used = curr_data['hist_map'].get(prev_date)
-    if not col_hist_used:
-        # Fallback to the latest available history column
-        sorted_keys = sorted([k for k in curr_data['hist_map'].keys() if k < target_date], reverse=True)
-        if sorted_keys: col_hist_used = curr_data['hist_map'][sorted_keys[0]]
-    
+    if not col_hist_used and prev_date in _cache: col_hist_used = _cache[prev_date]['hist_map'].get(prev_date)
     if not col_hist_used: return None
-    
     groups = [f"{i}x" for i in range(10)]
     stats_std = {g: {'wins': 0, 'ranks': []} for g in groups}
     stats_mod = {g: {'wins': 0} for g in groups}
-    
     if not manual_groups:
         past_dates = []
         check_d = target_date - timedelta(days=1)
@@ -313,30 +307,32 @@ def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits
             if check_d in _cache and check_d in _kq_db: past_dates.append(check_d)
             check_d -= timedelta(days=1)
             if (target_date - check_d).days > 40: break
-        
         for d in past_dates:
             d_df = _cache[d]['df']; kq = _kq_db[d]
             d_p_map = {}; d_s_map = {}
             for col in d_df.columns:
-                s_p = get_col_score(col, score_std_tuple); d_p_map[col] = s_p
-                s_s = get_col_score(col, score_mod_tuple); d_s_map[col] = s_s
-            
+                s_p = get_col_score(col, score_std_tuple)
+                if s_p > 0: d_p_map[col] = s_p
+                s_s = get_col_score(col, score_mod_tuple)
+                if s_s > 0: d_s_map[col] = s_s
             d_hist_col = None
-            d_sorted = sorted([k for k in _cache[d]['hist_map'].keys() if k < d], reverse=True)
-            if d_sorted: d_hist_col = _cache[d]['hist_map'][d_sorted[0]]
+            sorted_dates = sorted([k for k in _cache[d]['hist_map'].keys() if k < d], reverse=True)
+            if sorted_dates: d_hist_col = _cache[d]['hist_map'][sorted_dates[0]]
             if not d_hist_col: continue
-            
-            hist_series_d = d_df[d_hist_col].astype(str).str.upper().replace('S', '6', regex=False).str.replace(r'[^0-9X]', '', regex=True)
+            try:
+                hist_series_d = d_df[d_hist_col].astype(str).str.upper().replace('S', '6', regex=False)
+                hist_series_d = hist_series_d.str.replace(r'[^0-9X]', '', regex=True)
+            except: continue
             for g in groups:
-                mask = hist_series_d == g.upper(); mems = d_df[mask]
-                if mems.empty: continue
-                top80 = fast_get_top_nums(mems, d_p_map, d_s_map, 80, min_votes, use_inverse)
-                if kq in top80:
-                    stats_std[g]['wins'] += 1; stats_std[g]['ranks'].append(top80.index(kq) + 1)
+                mask = hist_series_d == g.upper()
+                mems = d_df[mask]
+                if mems.empty: stats_std[g]['ranks'].append(999); continue
+                top80_std = fast_get_top_nums(mems, d_p_map, d_s_map, 80, min_votes, use_inverse)
+                if kq in top80_std:
+                    stats_std[g]['wins'] += 1; stats_std[g]['ranks'].append(top80_std.index(kq) + 1)
                 else: stats_std[g]['ranks'].append(999)
-                top_m = fast_get_top_nums(mems, d_s_map, d_p_map, int(limits_config['mod']), min_votes, use_inverse)
-                if kq in top_m: stats_mod[g]['wins'] += 1
-
+                top86_mod = fast_get_top_nums(mems, d_s_map, d_p_map, int(limits_config['mod']), min_votes, use_inverse)
+                if kq in top86_mod: stats_mod[g]['wins'] += 1
     top6_std = []; best_mod_grp = ""
     if not manual_groups:
         final_std = []
@@ -344,85 +340,232 @@ def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits
         final_std.sort(key=lambda x: (x[1], x[2], x[3], x[0])) 
         top6_std = [x[0] for x in final_std[:6]]
         best_mod_grp = sorted(stats_mod.keys(), key=lambda g: (-stats_mod[g]['wins'], g))[0]
-    
-    hist_series = df[col_hist_used].astype(str).str.upper().replace('S', '6', regex=False).str.replace(r'[^0-9X]', '', regex=True)
-    
+    hist_series = df[col_hist_used].astype(str).str.upper().replace('S', '6', regex=False)
+    hist_series = hist_series.str.replace(r'[^0-9X]', '', regex=True)
     def get_final_pool(group_list, limit_dict, p_map, s_map):
         pool = []
         for g in group_list:
-            mask = hist_series == g.upper(); mems = df[mask]
+            mask = hist_series == g.upper(); valid_mems = df[mask]
             lim = limit_dict.get(g, limit_dict.get('default', 80))
-            pool.extend(fast_get_top_nums(mems, p_map, s_map, int(lim), min_votes, use_inverse))
+            res = fast_get_top_nums(valid_mems, p_map, s_map, int(lim), min_votes, use_inverse)
+            pool.extend(res)
         return pool
-
     final_original = []; final_modified = []
     if manual_groups:
-        final_original = sorted(list(set(get_final_pool(manual_groups, {'default': limits_config['l12']}, p_map_dict, s_map_dict))))
+        limit_map = {'default': limits_config['l12']}
+        final_original = sorted(list(set(get_final_pool(manual_groups, limit_map, p_map_dict, s_map_dict))))
         final_modified = sorted(list(set(get_final_pool(manual_groups, {'default': limits_config['mod']}, s_map_dict, p_map_dict))))
     else:
-        limits_std = {top6_std[0]: limits_config['l12'], top6_std[1]: limits_config['l12'], top6_std[2]: limits_config['l34'], top6_std[3]: limits_config['l34'], top6_std[4]: limits_config['l56'], top6_std[5]: limits_config['l56']}
-        s1 = {n for n, c in Counter(get_final_pool([top6_std[0], top6_std[5], top6_std[3]], limits_std, p_map_dict, s_map_dict)).items() if c >= 2}
-        s2 = {n for n, c in Counter(get_final_pool([top6_std[1], top6_std[4], top6_std[2]], limits_std, p_map_dict, s_map_dict)).items() if c >= 2}
+        limits_std = {
+            top6_std[0]: limits_config['l12'], top6_std[1]: limits_config['l12'], 
+            top6_std[2]: limits_config['l34'], top6_std[3]: limits_config['l34'], 
+            top6_std[4]: limits_config['l56'], top6_std[5]: limits_config['l56']
+        }
+        g_set1 = [top6_std[0], top6_std[5], top6_std[3]]
+        pool1 = get_final_pool(g_set1, limits_std, p_map_dict, s_map_dict)
+        s1 = {n for n, c in Counter(pool1).items() if c >= 2} 
+        g_set2 = [top6_std[1], top6_std[4], top6_std[2]]
+        pool2 = get_final_pool(g_set2, limits_std, p_map_dict, s_map_dict)
+        s2 = {n for n, c in Counter(pool2).items() if c >= 2}
         final_original = sorted(list(s1.intersection(s2)))
-        final_modified = sorted(fast_get_top_nums(df[hist_series == best_mod_grp.upper()], s_map_dict, p_map_dict, int(limits_config['mod']), min_votes, use_inverse))
-    
-    intersect = sorted(list(set(final_original).intersection(set(final_modified))))
-    # SMART TRIM LOGIC (Của ông viết để cắt dàn cuối)
-    if max_trim and len(intersect) > max_trim:
-        # ... (đoạn logic tính score để trim sẽ được đưa vào hàm smart_trim_by_score ở dưới)
-        intersect = smart_trim_by_score(intersect, df, p_map_dict, s_map_dict, max_trim)
-    
-    return {"top6_std": top6_std, "best_mod": best_mod_grp, "dan_goc": final_original, "dan_mod": final_modified, "dan_final": intersect, "source_col": col_hist_used}
+        mask_mod = hist_series == best_mod_grp.upper()
+        final_modified = sorted(fast_get_top_nums(df[mask_mod], s_map_dict, p_map_dict, int(limits_config['mod']), min_votes, use_inverse))
+    intersect_list = list(set(final_original).intersection(set(final_modified)))
+    if max_trim and len(intersect_list) > max_trim:
+        temp_df = df.copy()
+        melted = temp_df.melt(value_name='Val').dropna(subset=['Val'])
+        mask_bad = ~melted['Val'].astype(str).str.upper().str.contains(r'N|NGHI|SX|XIT', regex=True)
+        melted = melted[mask_bad]
+        s_nums = melted['Val'].astype(str).str.findall(r'\d+')
+        exploded = melted.assign(Num=s_nums).explode('Num').dropna(subset=['Num'])
+        exploded['Num'] = exploded['Num'].str.strip().str.zfill(2)
+        exploded = exploded[exploded['Num'].isin(intersect_list)]
+        exploded['Score'] = exploded['variable'].map(p_map_dict).fillna(0) + exploded['variable'].map(s_map_dict).fillna(0)
+        final_scores = exploded.groupby('Num')['Score'].sum().reset_index()
+        final_scores = final_scores.sort_values(by='Score', ascending=False)
+        final_intersect = sorted(final_scores.head(int(max_trim))['Num'].tolist()) 
+    else: final_intersect = sorted(intersect_list)
+    return {
+        "top6_std": top6_std, "best_mod": best_mod_grp, "dan_goc": final_original, 
+        "dan_mod": final_modified, "dan_final": final_intersect, "source_col": col_hist_used
+    }
 
-# --- ALLIANCE 8X LOGIC (NEW - CHỈ THÊM) ---
-def calculate_8x_alliance_custom(df, top6, limits, col_name="8X", min_vote=2):
-    def get_set(name, lim):
-        # Name col index 15, 8X col index 17
-        m_row = df[df.iloc[:, 15].astype(str).str.strip() == name]
+# ==============================================================================
+# 🛡️ NEW LOGIC: ALLIANCE 8X (GIAO THOA)
+# ==============================================================================
+
+def calculate_8x_alliance_custom(df_target, top_6_names, limits_config, col_name="8X", min_v=2):
+    """
+    Logic: Tìm Top 6 mạnh nhất -> Chia 2 liên minh (1-6-4 và 2-5-3) -> Lọc vote >= 2 -> Lấy GIAO THOA.
+    """
+    def get_set_from_member(name, limit):
+        # Xác định dòng thành viên (Cột Tên ở index 15)
+        m_row = df_target[df_target.iloc[:, 15].astype(str).str.strip() == name]
         if m_row.empty: return set()
+        # Lấy dữ liệu từ cột chỉ định (Mặc định 8X ở index 17)
         c_idx = 17 if col_name == "8X" else 27
-        return set(get_nums(str(m_row.iloc[0, c_idx]))[:lim])
-    
-    lms = {top6[0]: limits['l12'], top6[1]: limits['l12'], top6[2]: limits['l34'], top6[3]: limits['l34'], top6[4]: limits['l56'], top6[5]: limits['l56']}
-    
-    # LM1: 1, 6, 4 | LM2: 2, 5, 3
-    s1 = {n for n, c in Counter(list(get_set(top6[0], lms[top6[0]])) + list(get_set(top6[5], lms[top6[5]])) + list(get_set(top6[3], lms[top6[3]]))).items() if c >= min_vote}
-    s2 = {n for n, c in Counter(list(get_set(top6[1], lms[top6[1]])) + list(get_set(top6[4], lms[top6[4]])) + list(get_set(top6[2], lms[top6[2]]))).items() if c >= min_vote}
-    
-    return sorted(list(s1.intersection(s2)))
+        nums = get_nums(str(m_row.iloc[0, c_idx]))
+        return set(nums[:limit])
 
+    lim_map = {
+        top_6_names[0]: limits_config['l12'], top_6_names[1]: limits_config['l12'],
+        top_6_names[2]: limits_config['l34'], top_6_names[3]: limits_config['l34'],
+        top_6_names[4]: limits_config['l56'], top_6_names[5]: limits_config['l56']
+    }
+
+    # Liên minh 1: Top 1, 6, 4
+    set1 = get_set_from_member(top_6_names[0], lim_map[top_6_names[0]])
+    set6 = get_set_from_member(top_6_names[5], lim_map[top_6_names[5]])
+    set4 = get_set_from_member(top_6_names[3], lim_map[top_6_names[3]])
+    c1 = Counter(list(set1) + list(set6) + list(set4))
+    lm1 = {n for n, c in c1.items() if c >= min_v}
+
+    # Liên minh 2: Top 2, 5, 3
+    set2 = get_set_from_member(top_6_names[1], lim_map[top_6_names[1]])
+    set5 = get_set_from_member(top_6_names[4], lim_map[top_6_names[4]])
+    set3 = get_set_from_member(top_6_names[2], lim_map[top_6_names[2]])
+    c2 = Counter(list(set2) + list(set5) + list(set3))
+    lm2 = {n for n, c in c2.items() if c >= min_v}
+
+    return sorted(list(lm1.intersection(lm2)))
+
+# --- GỐC 3 LOGIC (CÓ SMART CUT) ---
 def smart_trim_by_score(number_list, df, p_map, s_map, target_size):
     if len(number_list) <= target_size: return sorted(number_list)
-    melted = df.melt(value_name='Val').dropna(subset=['Val'])
-    melted = melted[~melted['Val'].astype(str).str.upper().str.contains(r'N|NGHI|SX|XIT', regex=True)]
-    exploded = melted.assign(Num=melted['Val'].astype(str).str.findall(r'\d+')).explode('Num').dropna(subset=['Num'])
+    temp_df = df.copy()
+    melted = temp_df.melt(value_name='Val').dropna(subset=['Val'])
+    mask_bad = ~melted['Val'].astype(str).str.upper().str.contains(r'N|NGHI|SX|XIT', regex=True)
+    melted = melted[mask_bad]
+    s_nums = melted['Val'].astype(str).str.findall(r'\d+')
+    exploded = melted.assign(Num=s_nums).explode('Num').dropna(subset=['Num'])
     exploded['Num'] = exploded['Num'].str.strip().str.zfill(2)
     exploded = exploded[exploded['Num'].isin(number_list)]
-    exploded['Score'] = exploded['variable'].map(p_map).fillna(0) + exploded['variable'].map(s_map).fillna(0)
-    final_scores = exploded.groupby('Num')['Score'].sum().reset_index().sort_values(by='Score', ascending=False)
+    exploded['Score'] = exploded['variable'].map(p_map).fillna(0) 
+    final_scores = exploded.groupby('Num')['Score'].sum().reset_index()
+    final_scores = final_scores.sort_values(by='Score', ascending=False)
     return sorted(final_scores.head(int(target_size))['Num'].tolist())
-# ==============================================================================
-# 4. GIAO DIỆN SIDEBAR - QUẢN LÝ THÔNG SỐ (GIỮ 100% CODE CŨ)
-# ==============================================================================
-with st.sidebar:
-    st.header("⚙️ Cấu hình Chiến thuật")
-    
-    # --- THÊM MỚI: ĐIỀU KHIỂN LIÊN MINH 8X ---
-    st.markdown("### 🛡️ Alliance 8X Settings")
-    USE_ALLIANCE_8X = st.toggle("Bật Giao thoa Liên minh 8X", value=True)
-    COL_TARGET_8X = st.selectbox("🎯 Cột dữ liệu mục tiêu", ["8X", "M0", "M1", "M2"], index=0)
-    MIN_VOTES_LM = st.slider("🗳️ Vote tối thiểu trong LM", 1, 3, 2)
-    st.divider()
 
-    # --- TIẾP TỤC CÁC CẤU HÌNH CŨ ---
-    STRATEGY_MODE = st.selectbox("🧩 Chế độ tính toán", ["🛡️ V24 Cổ Điển", "🧪 Gốc 3 (Test)"])
+def calculate_goc_3_logic(target_date, rolling_window, _cache, _kq_db, input_limit, target_limit, score_std, use_inverse, min_votes):
+    dummy_lim = {'l12':1, 'l34':1, 'l56':1, 'mod':1}
+    res_v24 = calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, dummy_lim, min_votes, score_std, score_std, use_inverse)
+    if not res_v24: return None
+    top3 = res_v24['top6_std'][:3]
+    col_hist = res_v24['source_col']
+    curr_data = _cache[target_date]; df = curr_data['df']
+    real_cols = df.columns
+    p_map_dict = {}
+    score_std_tuple = tuple(score_std.items())
+    for col in real_cols:
+        s_p = get_col_score(col, score_std_tuple)
+        if s_p > 0: p_map_dict[col] = s_p
+    hist_series = df[col_hist].astype(str).str.upper().replace('S', '6', regex=False)
+    hist_series = hist_series.str.replace(r'[^0-9X]', '', regex=True)
+    pool_sets = []
+    for g in top3:
+        mask = hist_series == g.upper(); valid_mems = df[mask]
+        res = fast_get_top_nums(valid_mems, p_map_dict, p_map_dict, int(input_limit), min_votes, use_inverse)
+        pool_sets.append(set(res))
+    all_nums = []
+    for s in pool_sets: all_nums.extend(list(s))
+    counts = Counter(all_nums)
+    overlap_nums = [n for n, c in counts.items() if c >= 2]
+    final_set = smart_trim_by_score(overlap_nums, df, p_map_dict, {}, target_limit)
+    return {"top3": top3, "dan_final": final_set, "source_col": col_hist}
+
+@st.cache_data(show_spinner=False)
+def calculate_v24_final(target_date, rolling_window, _cache, _kq_db, limits_config, min_votes, score_std, score_mod, use_inverse, manual_groups=None, max_trim=None):
+    res = calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits_config, min_votes, score_std, score_mod, use_inverse, manual_groups, max_trim)
+    if not res: return None, "Lỗi dữ liệu"
+    return res, None
+
+def get_elite_members(df, top_n=10, sort_by='score'):
+    if df.empty: return df
+    m_cols = [c for c in df.columns if c.startswith('M')]
+    df = df.dropna(subset=m_cols, how='all')
+    if sort_by == 'score': return df.sort_values(by='SCORE_SORT', ascending=False).head(top_n)
+    else:
+        if 'STT' in df.columns: return df.sort_values(by='STT', ascending=True).head(top_n)
+        return df.head(top_n)
+
+def calculate_matrix_simple(df_members, weights_list):
+    scores = np.zeros(100)
+    for _, row in df_members.iterrows():
+        for i in range(len(weights_list)):
+            col_name = f"M{i}"; w = weights_list[i]
+            if col_name in df_members.columns and w > 0:
+                nums = get_nums(row[col_name])
+                for n in nums:
+                    try:
+                        n_int = int(n)
+                        if 0 <= n_int <= 99: scores[n_int] += w
+                    except: pass
+    result = []
+    for i in range(100):
+        if scores[i] > 0: result.append((i, scores[i]))
+    result.sort(key=lambda x: x[1], reverse=True)
+    return result
+
+def get_preset_params(preset_name):
+    if preset_name not in SCORES_PRESETS: return None
+    p = SCORES_PRESETS[preset_name]
+    std = {f'M{i}': p['STD'][i] for i in range(11)}
+    mod = {f'M{i}': p['MOD'][i] for i in range(11)}
+    lim = p['LIMITS']
+    rolling = p.get('ROLLING', 10) 
+    return std, mod, lim, rolling
+
+def load_config():
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, 'r', encoding='utf-8') as f: return json.load(f)
+        except: return None
+    return None
+
+def save_config(config_data):
+    try:
+        with open(CONFIG_FILE, 'w', encoding='utf-8') as f: json.dump(config_data, f, indent=4); return True
+    except: return False
+
+# --- KẾT THÚC PHẦN 1 ---
+# ==============================================================================
+# 4. QUẢN LÝ TRẠNG THÁI (SESSION STATE) & SIDEBAR
+# ==============================================================================
+
+# Khởi tạo giá trị mặc định nếu chưa có trong Session State
+if 'std_0' not in st.session_state:
+    s_std, s_mod, s_lim, s_roll = get_preset_params("Balanced (Khuyên dùng 2026)")
+    for i in range(11):
+        st.session_state[f'std_{i}'] = s_std[f'M{i}']
+        st.session_state[f'mod_{i}'] = s_mod[f'M{i}']
+    st.session_state['L12'] = s_lim['l12']
+    st.session_state['L34'] = s_lim['l34']
+    st.session_state['L56'] = s_lim['l56']
+    st.session_state['LMOD'] = s_lim['mod']
+    st.session_state['ROLLING_WINDOW'] = s_roll
+    st.session_state['MIN_VOTES'] = 1
+    st.session_state['MAX_TRIM'] = 80
+    st.session_state['USE_INVERSE'] = False
+    st.session_state['STRATEGY_MODE'] = "🛡️ V24 Cổ Điển"
+
+with st.sidebar:
+    st.header("🛡️ Bảng Điều Khiển")
     
-    # Phần quản lý Preset và Session State cũ của ông
-    menu_ops = ["Cấu hình hiện tại"] + list(SCORES_PRESETS.keys())
-    selected_cfg = st.selectbox("📚 Chọn bộ mẫu (Presets):", menu_ops)
+    # --- THÊM MỚI: TÙY CHỈNH ALLIANCE 8X ---
+    with st.expander("🛡️ Cấu hình Alliance 8X (Giao thoa)", expanded=True):
+        USE_ALLIANCE_8X = st.toggle("Kích hoạt Liên minh 8X", value=True)
+        COL_TARGET_8X = st.selectbox("🎯 Cột mục tiêu", ["8X", "M0", "M1", "M2"], index=0)
+        MIN_VOTES_LM = st.slider("🗳️ Vote tối thiểu LM", 1, 3, 2)
     
-    if st.button("🔄 Nạp cấu hình"):
-        if selected_cfg != "Cấu hình hiện tại":
+    st.divider()
+    
+    # --- QUẢN LÝ CHIẾN THUẬT CŨ ---
+    STRATEGY_MODE = st.selectbox("🧩 Chế độ Chiến thuật", ["🛡️ V24 Cổ Điển", "🧪 Gốc 3 (Test)"], index=0 if st.session_state['STRATEGY_MODE']=="🛡️ V24 Cổ Điển" else 1)
+    st.session_state['STRATEGY_MODE'] = STRATEGY_MODE
+    
+    with st.expander("📚 Thư viện Mẫu (Presets)"):
+        menu_ops = list(SCORES_PRESETS.keys())
+        selected_cfg = st.selectbox("Chọn Preset:", menu_ops)
+        if st.button("🚀 Áp dụng mẫu này"):
             vals = SCORES_PRESETS[selected_cfg]
             for i in range(11):
                 st.session_state[f'std_{i}'] = vals["STD"][i]
@@ -434,125 +577,156 @@ with st.sidebar:
             st.session_state['ROLLING_WINDOW'] = vals.get('ROLLING', 10)
             st.rerun()
 
-    # Các thanh trượt tinh chỉnh thông số chấm điểm (STD/MOD)
-    st.subheader("📊 Trọng số Điểm (Weights)")
-    col_w1, col_w2 = st.columns(2)
-    curr_std = {}
-    curr_mod = {}
-    for i in range(11):
-        with col_w1:
-            st.session_state[f'std_{i}'] = st.number_input(f"STD M{i}", 0, 100, st.session_state.get(f'std_{i}', 0))
-            curr_std[f'M{i}'] = st.session_state[f'std_{i}']
-        with col_w2:
-            st.session_state[f'mod_{i}'] = st.number_input(f"MOD M{i}", 0, 100, st.session_state.get(f'mod_{i}', 0))
-            curr_mod[f'M{i}'] = st.session_state[f'mod_{i}']
+    st.divider()
+    
+    # Tinh chỉnh thông số ma trận (STD/MOD)
+    st.subheader("📊 Trọng số Ma trận")
+    tab_std, tab_mod = st.tabs(["Điểm STD", "Điểm MOD"])
+    
+    with tab_std:
+        for i in range(11):
+            st.session_state[f'std_{i}'] = st.number_input(f"M{i} (STD)", 0, 100, st.session_state[f'std_{i}'], key=f"inp_std_{i}")
+    
+    with tab_mod:
+        for i in range(11):
+            st.session_state[f'mod_{i}'] = st.number_input(f"M{i} (MOD)", 0, 100, st.session_state[f'mod_{i}'], key=f"inp_mod_{i}")
 
     st.divider()
-    ROLLING_WINDOW = st.number_input("📅 Rolling (Ngày)", 1, 30, st.session_state.get('ROLLING_WINDOW', 10))
-    L_TOP_12 = st.number_input("✂️ Limit L1,2", 1, 100, st.session_state.get('L12', 75))
-    L_TOP_34 = st.number_input("✂️ Limit L3,4", 1, 100, st.session_state.get('L34', 70))
-    L_TOP_56 = st.number_input("✂️ Limit L5,6", 1, 100, st.session_state.get('L56', 65))
-    LIMIT_MODIFIED = st.number_input("✂️ Limit MOD", 1, 100, st.session_state.get('LMOD', 80))
-    MAX_TRIM_NUMS = st.slider("📏 Cắt dàn cuối (Max)", 50, 95, 80)
-    MIN_VOTES = st.slider("🗳️ Vote tối thiểu (V24)", 1, 5, 1)
-    USE_INVERSE = st.checkbox("🔄 Chế độ Nghịch đảo", value=False)
+    
+    # Cấu hình Limits và Rolling
+    ROLLING_WINDOW = st.number_input("📅 Rolling Window (Ngày)", 1, 30, st.session_state['ROLLING_WINDOW'])
+    st.session_state['ROLLING_WINDOW'] = ROLLING_WINDOW
+    
+    col_l1, col_l2 = st.columns(2)
+    with col_l1:
+        L_TOP_12 = st.number_input("✂️ Limit L1,2", 1, 100, st.session_state['L12'])
+        L_TOP_56 = st.number_input("✂️ Limit L5,6", 1, 100, st.session_state['L56'])
+    with col_l2:
+        L_TOP_34 = st.number_input("✂️ Limit L3,4", 1, 100, st.session_state['L34'])
+        LIMIT_MODIFIED = st.number_input("✂️ Limit MOD", 1, 100, st.session_state['LMOD'])
+        
+    st.session_state['L12'], st.session_state['L34'], st.session_state['L56'], st.session_state['LMOD'] = L_TOP_12, L_TOP_34, L_TOP_56, LIMIT_MODIFIED
+    
+    MAX_TRIM_NUMS = st.slider("📏 Cắt dàn cuối (Max)", 50, 95, st.session_state['MAX_TRIM'])
+    st.session_state['MAX_TRIM'] = MAX_TRIM_NUMS
+    
+    MIN_VOTES = st.slider("🗳️ Vote tối thiểu (V24)", 1, 5, st.session_state['MIN_VOTES'])
+    st.session_state['MIN_VOTES'] = MIN_VOTES
+    
+    USE_INVERSE = st.checkbox("🔄 Chế độ Nghịch đảo", value=st.session_state['USE_INVERSE'])
+    st.session_state['USE_INVERSE'] = USE_INVERSE
+    
+    USE_ADAPTIVE = st.checkbox("🧠 Adaptive Weights", value=False)
 
 # ==============================================================================
-# 5. XỬ LÝ DỮ LIỆU VÀ HIỂN THỊ KẾT QUẢ (GIỮ 100% LOGIC CŨ)
+# 5. CHƯƠNG TRÌNH CHÍNH (MAIN APP)
 # ==============================================================================
-uploaded_files = st.file_uploader("📂 Tải lên các file dữ liệu (CSV/XLSX)", accept_multiple_files=True)
+
+uploaded_files = st.file_uploader("📂 Tải lên dữ liệu tổng hợp (CSV/XLSX)", accept_multiple_files=True)
 
 if uploaded_files:
     data_cache, kq_db, status, logs = load_data_v24(uploaded_files)
     
     if data_cache:
-        st.success(f"⚡ Đã nạp thành công {len(data_cache)} ngày dữ liệu.")
-        all_dates = sorted(list(data_cache.keys()), reverse=True)
-        target_date = st.selectbox("📅 Chọn ngày soi cầu:", all_dates)
+        st.success(f"✅ Hệ thống đã sẵn sàng với {len(data_cache)} ngày dữ liệu.")
         
-        if target_date:
-            user_limits = {'l12': L_TOP_12, 'l34': L_TOP_34, 'l56': L_TOP_56, 'mod': LIMIT_MODIFIED}
+        # --- TAB CHÍNH: SOI CẦU & PHÂN TÍCH ---
+        tab_soi, tab_backtest, tab_tool = st.tabs(["🎯 Soi cầu hằng ngày", "📊 Backtest Hệ thống", "🛠️ Công cụ phụ"])
+        
+        with tab_soi:
+            all_dates = sorted(list(data_cache.keys()), reverse=True)
+            target_date = st.selectbox("📅 Chọn ngày soi cầu:", all_dates, key="sb_target_date")
             
-            # Tính toán logic chính
-            with st.spinner("🔄 Đang xử lý ma trận liên minh..."):
-                if STRATEGY_MODE == "🛡️ V24 Cổ Điển":
-                    res, err = calculate_v24_final(target_date, ROLLING_WINDOW, data_cache, kq_db, user_limits, MIN_VOTES, curr_std, curr_mod, USE_INVERSE, max_trim=MAX_TRIM_NUMS)
-                else:
-                    # Chế độ Gốc 3
-                    g3_res = calculate_goc_3_logic(target_date, ROLLING_WINDOW, data_cache, kq_db, L_TOP_12, MAX_TRIM_NUMS, curr_std, USE_INVERSE, MIN_VOTES)
-                    res = {"top6_std": g3_res['top3'] + ["N/A"]*3, "dan_final": g3_res['dan_final'], "source_col": g3_res['source_col'], "dan_goc": [], "dan_mod": [], "best_mod": "N/A"}
-                    err = None
-
-            if res:
-                # HIỂN THỊ KẾT QUẢ THEO ĐÚNG FORMAT CỦA ÔNG
-                st.header(f"🎯 Kết quả soi cầu ngày: {target_date.strftime('%d/%m/%Y')}")
+            if target_date:
+                curr_std = {f'M{i}': st.session_state[f'std_{i}'] for i in range(11)}
+                curr_mod = {f'M{i}': st.session_state[f'mod_{i}'] for i in range(11)}
                 
-                c1, c2, c3 = st.columns(3)
-                with c1: st.metric("Top 1-2 (L12)", f"{L_TOP_12}s")
-                with c2: st.metric("Top 3-4 (L34)", f"{L_TOP_34}s")
-                with c3: st.metric("Dàn cuối", f"{len(res['dan_final'])}s")
-
-                st.divider()
+                if USE_ADAPTIVE:
+                    curr_std = get_adaptive_weights(target_date, curr_std, data_cache, kq_db)
                 
-                # --- KHU VỰC HIỂN THỊ LIÊN MINH 8X (CHỈ THÊM) ---
-                if USE_ALLIANCE_8X:
-                    st.subheader("🛡️ Dàn Tinh hoa Liên minh 8X (Giao thoa 1-6-4 & 2-5-3)")
-                    dan_8x = calculate_8x_alliance_custom(data_cache[target_date]['df'], res['top6_std'], user_limits, col_name=COL_TARGET_8X, min_vote=MIN_VOTES_LM)
-                    st.code(", ".join(dan_8x), language="text")
-                    st.caption(f"Số lượng: {len(dan_8x)} số | Cột: {COL_TARGET_8X} | Vote >= {MIN_VOTES_LM}")
+                user_limits = {'l12': L_TOP_12, 'l34': L_TOP_34, 'l56': L_TOP_56, 'mod': LIMIT_MODIFIED}
+                
+                with st.spinner("🚀 Đang tính toán ma trận Tinh hoa..."):
+                    if STRATEGY_MODE == "🛡️ V24 Cổ Điển":
+                        res, err = calculate_v24_final(target_date, ROLLING_WINDOW, data_cache, kq_db, user_limits, MIN_VOTES, curr_std, curr_mod, USE_INVERSE, max_trim=MAX_TRIM_NUMS)
+                    else:
+                        g3_res = calculate_goc_3_logic(target_date, ROLLING_WINDOW, data_cache, kq_db, L_TOP_12, MAX_TRIM_NUMS, curr_std, USE_INVERSE, MIN_VOTES)
+                        res = {"top6_std": g3_res['top3'] + ["N/A"]*3, "dan_final": g3_res['dan_final'], "source_col": g3_res['source_col'], "dan_goc": [], "dan_mod": [], "best_mod": "N/A"}
+                        err = None
+                
+                if res:
+                    st.header(f"🔮 Kết quả soi cầu: {target_date.strftime('%d/%m/%Y')}")
+                    
+                    # Khu vực Alliance 8X
+                    if USE_ALLIANCE_8X:
+                        st.markdown("### 🛡️ Dàn Tinh hoa Alliance 8X (Giao thoa)")
+                        dan_8x = calculate_8x_alliance_custom(data_cache[target_date]['df'], res['top6_std'], user_limits, col_name=COL_TARGET_8X, min_v=MIN_VOTES_LM)
+                        st.code(", ".join(dan_8x), language="text")
+                        
+                        if target_date in kq_db:
+                            kq_val = str(kq_db[target_date]).zfill(2)
+                            if kq_val in dan_8x: st.success(f"✅ ALLIANCE WIN: {kq_val}")
+                            else: st.error(f"❌ ALLIANCE MISS: {kq_val}")
+                        st.divider()
+
+                    # Khu vực V24 Gốc
+                    st.markdown("### 💎 Dàn Tinh hoa V24 (Gốc)")
+                    st.code(", ".join(res['dan_final']), language="text")
                     
                     if target_date in kq_db:
-                        real_kq = str(kq_db[target_date]).zfill(2)
-                        if real_kq in dan_8x: st.success(f"✨ ALLIANCE WIN: {real_kq}")
-                        else: st.error(f"💀 ALLIANCE MISS: {real_kq}")
-                    st.divider()
+                        kq_val = str(kq_db[target_date]).zfill(2)
+                        if kq_val in res['dan_final']: st.success(f"✅ V24 WIN: {kq_val}")
+                        else: st.error(f"❌ V24 MISS: {kq_val}")
 
-                # HIỂN THỊ DÀN GỐC CỦA ÔNG
-                st.subheader("💎 Dàn Tinh hoa V24 (Mặc định)")
-                st.code(", ".join(res['dan_final']), language="text")
-                
-                if target_date in kq_db:
-                    real_kq = str(kq_db[target_date]).zfill(2)
-                    if real_kq in res['dan_final']: st.success(f"✨ V24 WIN: {real_kq}")
-                    else: st.error(f"💀 V24 MISS: {real_kq}")
+                    # Chi tiết phân tích
+                    with st.expander("🔎 Xem chi tiết phân tích cao thủ"):
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            st.write(f"**Top 6 Nhóm STD:** {', '.join(res['top6_std'])}")
+                            st.write(f"**Cột lịch sử:** {res['source_col']}")
+                        with c2:
+                            st.write(f"**Dàn Gốc ({len(res['dan_goc'])}s):** {', '.join(res['dan_goc'][:10])}...")
+                            st.write(f"**Dàn MOD ({len(res['dan_mod'])}s):** {', '.join(res['dan_mod'][:10])}...")
 
-                with st.expander("📝 Chi tiết phân tích cao thủ"):
-                    st.write(f"**Sáu ông mạnh nhất (STD):** {', '.join(res['top6_std'])}")
-                    st.write(f"**Ông MOD tốt nhất:** {res['best_mod']}")
-                    st.write(f"**Cột dữ liệu quét:** {res['source_col']}")
-
-            # ==============================================================================
-            # 6. HỆ THỐNG BACKTEST (GIỮ 100% CODE CŨ + THÊM THEO DÕI ALLIANCE)
-            # ==============================================================================
-            st.divider()
-            if st.button("🚀 Chạy Backtest toàn bộ dữ liệu"):
-                st.subheader("📊 Bảng thống kê hiệu suất")
+        with tab_backtest:
+            st.subheader("📊 Backtest Hiệu suất Cấu hình")
+            if st.button("▶️ Bắt đầu chạy Backtest"):
                 bt_dates = sorted([d for d in data_cache.keys() if d in kq_db])
-                
-                report_data = []
-                for d in bt_dates:
-                    # Chạy logic cho từng ngày
-                    r, _ = calculate_v24_final(d, ROLLING_WINDOW, data_cache, kq_db, user_limits, MIN_VOTES, curr_std, curr_mod, USE_INVERSE, max_trim=MAX_TRIM_NUMS)
-                    if r:
-                        real = str(kq_db[d]).zfill(2)
-                        v24_hit = real in r['dan_final']
-                        
-                        # Check thêm Alliance cho Backtest
-                        d_8x = calculate_8x_alliance_custom(data_cache[d]['df'], r['top6_std'], user_limits, col_name=COL_TARGET_8X, min_vote=MIN_VOTES_LM)
-                        alliance_hit = real in d_8x
-                        
-                        report_data.append({
-                            "Ngày": d.strftime("%d/%m"),
-                            "Kết quả": real,
-                            "V24 (Gốc)": "✅" if v24_hit else "❌",
-                            "Alliance 8X": "🌟" if alliance_hit else "☁️",
-                            "Size 8X": len(d_8x)
-                        })
-                
-                st.table(pd.DataFrame(report_data))
+                if not bt_dates:
+                    st.warning("Không tìm thấy KQ để Backtest.")
+                else:
+                    results = []
+                    progress_bar = st.progress(0)
+                    for idx, d in enumerate(bt_dates):
+                        r, _ = calculate_v24_final(d, ROLLING_WINDOW, data_cache, kq_db, user_limits, MIN_VOTES, curr_std, curr_mod, USE_INVERSE, max_trim=MAX_TRIM_NUMS)
+                        if r:
+                            kq = str(kq_db[d]).zfill(2)
+                            v24_hit = kq in r['dan_final']
+                            d_8x = calculate_8x_alliance_custom(data_cache[d]['df'], r['top6_std'], user_limits, col_name=COL_TARGET_8X, min_v=MIN_VOTES_LM)
+                            all_hit = kq in d_8x
+                            results.append({
+                                "Ngày": d.strftime("%d/%m"),
+                                "KQ": kq,
+                                "V24": "✅" if v24_hit else "❌",
+                                "Alliance 8X": "🌟" if all_hit else "☁️",
+                                "Size 8X": len(d_8x)
+                            })
+                        progress_bar.progress((idx + 1) / len(bt_dates))
+                    
+                    st.table(pd.DataFrame(results))
+
+        with tab_tool:
+            st.subheader("🛠️ Công cụ hỗ trợ")
+            tool_mode = st.radio("Chọn công cụ:", ["Tạo dàn nhanh", "Phân tích file lẻ"])
+            if tool_mode == "Tạo dàn nhanh":
+                txt = st.text_area("Dán danh sách số vào đây:")
+                if txt:
+                    nums = get_nums(txt)
+                    st.write(f"Số lượng: {len(nums)}")
+                    st.code(",".join(nums))
 
     if logs:
-        with st.expander("⚠️ Nhật ký lỗi file"):
-            for l in logs: st.warning(l)
+        with st.expander("⚠️ Nhật ký lỗi hệ thống"):
+            for log in logs: st.warning(log)
 else:
-    st.info("💡 Quang ơi, hãy tải các file tổng hợp (.csv hoặc .xlsx) lên để bắt đầu soi cầu nhé!")
+    st.info("👋 Chào Quang Handsome! Hãy tải các file tổng hợp lên để tôi bắt đầu làm việc.")
