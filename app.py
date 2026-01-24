@@ -277,7 +277,7 @@ def fast_get_top_nums(df, p_map_dict, s_map_dict, top_n, min_v, inverse):
     if inverse: stats = stats.sort_values(by=['P', 'S', 'Num_Int'], ascending=[False, False, True])
     else: stats = stats.sort_values(by=['P', 'V', 'Num_Int'], ascending=[False, False, True])
     return stats['Num'].head(int(top_n)).tolist()
-
+# --- V24 LOGIC ---
 def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits_config, min_votes, score_std, score_mod, use_inverse, manual_groups=None, max_trim=None):
     if target_date not in _cache: return None
     curr_data = _cache[target_date]; df = curr_data['df']
@@ -420,141 +420,10 @@ def calculate_goc_3_logic(target_date, rolling_window, _cache, _kq_db, input_lim
     final_set = smart_trim_by_score(overlap_nums, df, p_map_dict, {}, target_limit)
     return {"top3": top3, "dan_final": final_set, "source_col": col_hist}
 
-# --- 🛡️ CHIẾN THUẬT CẤY THÊM: ALLIANCE 8X (GIAO THOA 1-6-4 & 2-5-3) ---
+# --- 🛡️ CHIẾN THUẬT MỚI: ALLIANCE 8X (GIAO THOA 1-6-4 & 2-5-3) ---
 def calculate_8x_alliance_custom(df_target, top_6_names, limits_config, col_name="8X", min_v=2):
     def get_set_from_member(name, limit):
-        m_row = df_target[df_target.iloc[:, 15].astype(str).str.strip() == name]
-        if m_row.empty: return set()
-        c_idx = 17 if col_name == "8X" else 27
-        nums = get_nums(str(m_row.iloc[0, c_idx]))
-        return set(nums[:limit])
-    lim_map = {
-        top_6_names[0]: limits_config['l12'], top_6_names[1]: limits_config['l12'],
-        top_6_names[2]: limits_config['l34'], top_6_names[3]: limits_config['l34'],
-        top_6_names[4]: limits_config['l56'], top_6_names[5]: limits_config['l56']
-    }
-    set1 = get_set_from_member(top_6_names[0], lim_map[top_6_names[0]])
-    set6 = get_set_from_member(top_6_names[5], lim_map[top_6_names[5]])
-    set4 = get_set_from_member(top_6_names[3], lim_map[top_6_names[3]])
-    c1 = Counter(list(set1) + list(set6) + list(set4))
-    lm1 = {n for n, c in c1.items() if c >= min_v}
-    set2 = get_set_from_member(top_6_names[1], lim_map[top_6_names[1]])
-    set5 = get_set_from_member(top_6_names[4], lim_map[top_6_names[4]])
-    set3 = get_set_from_member(top_6_names[2], lim_map[top_6_names[2]])
-    c2 = Counter(list(set2) + list(set5) + list(set3))
-    lm2 = {n for n, c in c2.items() if c >= min_v}
-    return sorted(list(lm1.intersection(lm2)))
-
-@st.cache_data(show_spinner=False)
-def calculate_v24_final(target_date, rolling_window, _cache, _kq_db, limits_config, min_votes, score_std, score_mod, use_inverse, manual_groups=None, max_trim=None):
-    res = calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits_config, min_votes, score_std, score_mod, use_inverse, manual_groups, max_trim)
-    if not res: return None, "Lỗi dữ liệu hoặc không tìm thấy lịch sử nhóm."
-    return res, None
-
-def get_elite_members(df, top_n=10, sort_by='score'):
-    if df.empty: return df
-    m_cols = [c for c in df.columns if c.startswith('M')]
-    df = df.dropna(subset=m_cols, how='all')
-    if sort_by == 'score': return df.sort_values(by='SCORE_SORT', ascending=False).head(top_n)
-    else:
-        if 'STT' in df.columns: return df.sort_values(by='STT', ascending=True).head(top_n)
-        return df.head(top_n)
-                if kq in top80_std:
-                    stats_std[g]['wins'] += 1; stats_std[g]['ranks'].append(top80_std.index(kq) + 1)
-                else: stats_std[g]['ranks'].append(999)
-                top86_mod = fast_get_top_nums(mems, d_s_map, d_p_map, int(limits_config['mod']), min_votes, use_inverse)
-                if kq in top86_mod: stats_mod[g]['wins'] += 1
-    top6_std = []; best_mod_grp = ""
-    if not manual_groups:
-        final_std = []
-        for g, inf in stats_std.items(): final_std.append((g, -inf['wins'], sum(inf['ranks']), sorted(inf['ranks'])))
-        final_std.sort(key=lambda x: (x[1], x[2], x[3], x[0])) 
-        top6_std = [x[0] for x in final_std[:6]]
-        best_mod_grp = sorted(stats_mod.keys(), key=lambda g: (-stats_mod[g]['wins'], g))[0]
-    hist_series = df[col_hist_used].astype(str).str.upper().replace('S', '6', regex=False)
-    hist_series = hist_series.str.replace(r'[^0-9X]', '', regex=True)
-    def get_final_pool(group_list, limit_dict, p_map, s_map):
-        pool = []
-        for g in group_list:
-            mask = hist_series == g.upper(); valid_mems = df[mask]
-            lim = limit_dict.get(g, limit_dict.get('default', 80))
-            res = fast_get_top_nums(valid_mems, p_map, s_map, int(lim), min_votes, use_inverse)
-            pool.extend(res)
-        return pool
-    final_original = []; final_modified = []
-    if manual_groups:
-        limit_map = {'default': limits_config['l12']}
-        final_original = sorted(list(set(get_final_pool(manual_groups, limit_map, p_map_dict, s_map_dict))))
-        final_modified = sorted(list(set(get_final_pool(manual_groups, {'default': limits_config['mod']}, s_map_dict, p_map_dict))))
-    else:
-        limits_std = {
-            top6_std[0]: limits_config['l12'], top6_std[1]: limits_config['l12'], 
-            top6_std[2]: limits_config['l34'], top6_std[3]: limits_config['l34'], 
-            top6_std[4]: limits_config['l56'], top6_std[5]: limits_config['l56']
-        }
-        g_set1 = [top6_std[0], top6_std[5], top6_std[3]]
-        pool1 = get_final_pool(g_set1, limits_std, p_map_dict, s_map_dict)
-        s1 = {n for n, c in Counter(pool1).items() if c >= 2} 
-        g_set2 = [top6_std[1], top6_std[4], top6_std[2]]
-        pool2 = get_final_pool(g_set2, limits_std, p_map_dict, s_map_dict)
-        s2 = {n for n, c in Counter(pool2).items() if c >= 2}
-        final_original = sorted(list(s1.intersection(s2)))
-        mask_mod = hist_series == best_mod_grp.upper()
-        final_modified = sorted(fast_get_top_nums(df[mask_mod], s_map_dict, p_map_dict, int(limits_config['mod']), min_votes, use_inverse))
-    intersect_list = list(set(final_original).intersection(set(final_modified)))
-    if max_trim and len(intersect_list) > max_trim:
-        intersect_list = smart_trim_by_score(intersect_list, df, p_map_dict, s_map_dict, max_trim)
-    else: final_intersect = sorted(intersect_list)
-    return {
-        "top6_std": top6_std, "best_mod": best_mod_grp, "dan_goc": final_original, 
-        "dan_mod": final_modified, "dan_final": final_intersect, "source_col": col_hist_used
-    }
-
-def smart_trim_by_score(number_list, df, p_map, s_map, target_size):
-    if len(number_list) <= target_size: return sorted(number_list)
-    temp_df = df.copy()
-    melted = temp_df.melt(value_name='Val').dropna(subset=['Val'])
-    mask_bad = ~melted['Val'].astype(str).str.upper().str.contains(r'N|NGHI|SX|XIT', regex=True)
-    melted = melted[mask_bad]
-    s_nums = melted['Val'].astype(str).str.findall(r'\d+')
-    exploded = melted.assign(Num=s_nums).explode('Num').dropna(subset=['Num'])
-    exploded['Num'] = exploded['Num'].str.strip().str.zfill(2)
-    exploded = exploded[exploded['Num'].isin(number_list)]
-    exploded['Score'] = exploded['variable'].map(p_map).fillna(0) + exploded['variable'].map(s_map).fillna(0)
-    final_scores = exploded.groupby('Num')['Score'].sum().reset_index()
-    final_scores = final_scores.sort_values(by='Score', ascending=False)
-    return sorted(final_scores.head(int(target_size))['Num'].tolist())
-
-def calculate_goc_3_logic(target_date, rolling_window, _cache, _kq_db, input_limit, target_limit, score_std, use_inverse, min_votes):
-    dummy_lim = {'l12':1, 'l34':1, 'l56':1, 'mod':1}
-    res_v24 = calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, dummy_lim, min_votes, score_std, score_std, use_inverse)
-    if not res_v24: return None
-    top3 = res_v24['top6_std'][:3]
-    col_hist = res_v24['source_col']
-    curr_data = _cache[target_date]; df = curr_data['df']
-    p_map_dict = {}
-    score_std_tuple = tuple(score_std.items())
-    for col in df.columns:
-        s_p = get_col_score(col, score_std_tuple)
-        if s_p > 0: p_map_dict[col] = s_p
-    hist_series = df[col_hist].astype(str).str.upper().replace('S', '6', regex=False)
-    hist_series = hist_series.str.replace(r'[^0-9X]', '', regex=True)
-    pool_sets = []
-    for g in top3:
-        mask = hist_series == g.upper()
-        valid_mems = df[mask]
-        res = fast_get_top_nums(valid_mems, p_map_dict, p_map_dict, int(input_limit), min_votes, use_inverse)
-        pool_sets.append(set(res))
-    all_nums = []
-    for s in pool_sets: all_nums.extend(list(s))
-    counts = Counter(all_nums)
-    overlap_nums = [n for n, c in counts.items() if c >= 2]
-    final_set = smart_trim_by_score(overlap_nums, df, p_map_dict, {}, target_limit)
-    return {"top3": top3, "dan_final": final_set, "source_col": col_hist}
-
-# --- 🛡️ CHIẾN THUẬT MỚI: ALLIANCE 8X (GIAO THOA) ---
-def calculate_8x_alliance_custom(df_target, top_6_names, limits_config, col_name="8X", min_v=2):
-    def get_set_from_member(name, limit):
+        # Lưu ý: Cột 15 là Tên, Cột 17 là Dàn 8X (hoặc cột khác tuỳ chọn)
         m_row = df_target[df_target.iloc[:, 15].astype(str).str.strip() == name]
         if m_row.empty: return set()
         c_idx = 17 if col_name == "8X" else 27
@@ -718,7 +587,7 @@ if uploaded_files:
                 u_lims = {'l12': L12, 'l34': L34, 'l56': L56, 'mod': LMOD}
                 if USE_ADAPT: c_std_w = get_adaptive_weights(target_date, c_std_w, data_cache, kq_db)
                 
-                # NÚT PHÂN TÍCH (QUAN TRỌNG)
+                # NÚT PHÂN TÍCH
                 if st.button("🚀 BẮT ĐẦU PHÂN TÍCH V24"):
                     if STRATEGY_MODE == "🛡️ V24 Cổ Điển":
                         res, err = calculate_v24_final(target_date, ROLL_W, data_cache, kq_db, u_lims, MIN_V, c_std_w, c_mod_w, USE_INV, max_trim=MAX_T)
@@ -748,7 +617,7 @@ if uploaded_files:
 
         with tab_backtest:
             st.subheader("📊 Backtest Hệ thống")
-            # CHỌN NGÀY VÀ DÀN BACKTEST (QUAN TRỌNG)
+            # CHỌN NGÀY VÀ DÀN BACKTEST
             bt_dates_all = sorted([d for d in data_cache.keys() if d in kq_db])
             if bt_dates_all:
                 col_b1, col_b2 = st.columns(2)
@@ -785,7 +654,6 @@ if uploaded_files:
                 
                 input_df = get_elite_members(df_target, top_n=top_n_select, sort_by=filter_mode)
                 with st.expander("📋 Danh sách Cao thủ"):
-                    # Cột chính xác của ông đây
                     display_cols = ['STT', 'THÀNH VIÊN', 'SCORE_SORT'] if 'THÀNH VIÊN' in input_df.columns else input_df.columns
                     st.dataframe(input_df[display_cols], use_container_width=True)
                 
