@@ -15,14 +15,14 @@ import pa2_preanalysis_text as pa2
 # 1. CẤU HÌNH HỆ THỐNG
 # ==============================================================================
 st.set_page_config(
-    page_title="Quang Pro V62 - Alien 8x Final", 
+    page_title="Quang Pro V62 - Alien 8x R-Column Fix", 
     page_icon="👽", 
     layout="wide",
     initial_sidebar_state="collapsed" 
 )
 
-st.title("🛡️ Quang Handsome: V62 + Alien 8x (Custom)")
-st.caption("🚀 Fix lỗi đọc tên cột | Alien 8x chạy theo cấu hình màn hình | Rolling Window")
+st.title("🛡️ Quang Handsome: V62 + Alien 8x (Fix Cột R)")
+st.caption("🚀 Fix: Alien 8x lấy đúng cột R (Index 17) | Custom Limit màn hình | Rolling Window")
 
 CONFIG_FILE = 'config.json'
 
@@ -162,7 +162,7 @@ def find_header_row(df_preview):
         if any(k in row_str for k in keywords): return idx
     return 3
 
-# --- HÀM LOAD DATA ĐÃ SỬA LỖI (FIX RENAMING) ---
+# --- HÀM LOAD DATA (CÓ FIX ĐỔI TÊN CỘT THÀNH VIÊN) ---
 @st.cache_data(ttl=600, show_spinner=False)
 def load_data_v24(files):
     cache = {}; kq_db = {}; err_logs = []; file_status = []
@@ -263,34 +263,32 @@ def load_data_v24(files):
         except Exception as e: err_logs.append(f"Lỗi '{file.name}': {str(e)}"); continue
     return cache, kq_db, file_status, err_logs
 
-# --- HÀM ALIEN 8X ĐÃ SỬA: LẤY CỘT 8X (HOẶC INDEX 17) & CẮT THEO MÀN HÌNH ---
+# --- [SỬA LỖI] ALIEN 8X: LẤY CỘT INDEX 17 (CỘT R) ---
 def calculate_alien_8x_logic(df, top_6_names, limits_config, col_hist_used=None):
+    """
+    Tính toán Alien 8x Alliance.
+    [FIX]: Lấy dữ liệu từ cột Index 17 (Cột R - Dàn 8X gốc) 
+    """
     try:
         def get_mem_set_8x_real(name, limit):
-            # Giờ đây cột MEMBER chắc chắn tồn tại nhờ fix ở trên
             if 'MEMBER' not in df.columns: return set()
             row = df[df['MEMBER'] == name]
             if row.empty: return set()
             
+            # --- TRỰC TIẾP LẤY CỘT INDEX 17 (Cột R) ---
             val = ""
-            # Ưu tiên tìm cột tên "8X" (thường là Index 17)
-            col_8x = next((c for c in df.columns if str(c).upper().strip() == '8X'), None)
-            
-            # Kiểm tra xem cột 8X đó có chứa số không (hay là rác 8x, miss)
-            # Nếu cột 8X chứa chuỗi dài > 10 ký tự số -> Tin tưởng
-            valid_8x = False
-            if col_8x:
-                raw_val = str(row.iloc[0][col_8x])
-                if len(get_nums(raw_val)) > 10: 
-                    val = raw_val
-                    valid_8x = True
-            
-            # Nếu không tìm thấy cột 8X ngon, fallback về cột Index 17
-            if not valid_8x and len(df.columns) > 17:
-                 val = row.iloc[0, 17]
+            if len(df.columns) > 17:
+                val = row.iloc[0, 17]
+            else:
+                # Nếu file bị thiếu cột, thử tìm cột tên '8X'
+                col_8x = next((c for c in df.columns if str(c).upper().strip() == '8X'), None)
+                if col_8x: val = row.iloc[0][col_8x]
 
+            # Lấy chuỗi số
             nums = get_nums(str(val))
-            # Cắt theo cấu hình màn hình (limit)
+            
+            # Cắt theo limit cấu hình (Ví dụ: Top 1 lấy 75 số)
+            # Lưu ý: Cột R gốc thường có ~80-90 số, nên cắt 75 là hợp lý.
             return set(nums[:limit])
 
         # Lấy giới hạn từ màn hình (được truyền vào qua limits_config)
