@@ -350,7 +350,7 @@ def calculate_alien_8x_logic(df, top_6_names, limits_config, score_std):
 # HẾT PHẦN 1
 # ==============================================================================
 # ==============================================================================
-# TIẾP THEO PHẦN 1... CÁC HÀM HỖ TRỢ VÀ MAIN APP
+# PHẦN 2: CÁC HÀM HỖ TRỢ VÀ MAIN APP (ĐÃ FIX LỖI UNBOUND LOCAL ERROR)
 # ==============================================================================
 
 def fast_get_top_nums(df, p_map_dict, s_map_dict, top_n, min_v, inverse):
@@ -621,7 +621,7 @@ def get_top6_rolling_8x(df, target_date, rolling_days, score_std):
     except: return []
 
 # ==============================================================================
-# 3. GIAO DIỆN CHÍNH (MAIN APP) - ĐÃ CẬP NHẬT LOGIC ALIEN
+# 3. GIAO DIỆN CHÍNH (MAIN APP) - ĐÃ FIX UNBOUND LOCAL ERROR
 # ==============================================================================
 
 def main():
@@ -842,11 +842,13 @@ def main():
                         except Exception as e:
                             st.error(f"Lỗi Alien 8x: {e}")
 
+                        # [FIX UNBOUND LOCAL ERROR]: Lưu cả res_hc vào session_state
                         st.session_state['run_result'] = {
                             'res_curr': res_curr, 'target': target, 'err': err_curr,
                             'hc_goc': hc_goc, 'screen_goc': screen_goc, 'hybrid_goc': hybrid_goc,
                             'alien_res': alien_res,
-                            'alien_source': alien_source_msg
+                            'alien_source': alien_source_msg,
+                            'res_hc': res_hc  # <--- THÊM DÒNG NÀY ĐỂ TRÁNH LỖI KHI RERENDER
                         }
 
                 if 'run_result' in st.session_state and st.session_state['run_result']['target'] == target:
@@ -890,7 +892,8 @@ def main():
                                 if real in alien_data: st.success("Alien 8x: WIN")
                                 else: st.error("Alien 8x: MISS")
                                 
-                            pa2.render_pa2_preanalysis(res_curr=res_curr, res_hc=res_hc, hybrid_goc=hybrid_goc)
+                            # [FIX UNBOUND LOCAL ERROR]: Lấy res_hc từ session_state (rr.get)
+                            pa2.render_pa2_preanalysis(res_curr=res_curr, res_hc=rr.get('res_hc'), hybrid_goc=hybrid_goc)
 
             # --- TAB 2: BACKTEST (UPDATED ALIEN) ---
             with tab2:
