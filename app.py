@@ -22,7 +22,7 @@ st.set_page_config(
 )
 
 st.title("🛡️ Quang Handsome: V62 Dynamic Hybrid + Alien 8x")
-st.caption("🚀 Tính năng mới: Hybrid thay đổi theo tinh chỉnh màn hình | Backtest Đơn | M Động | Alien 8x Alliance")
+st.caption("🚀 Tính năng mới: Hybrid thay đổi theo tinh chỉnh màn hình | Backtest Đơn | M Động | Alien 8x Alliance (Fix Data Source)")
 
 CONFIG_FILE = 'config.json'
 
@@ -252,15 +252,31 @@ def load_data_v24(files):
         except Exception as e: err_logs.append(f"Lỗi '{file.name}': {str(e)}"); continue
     return cache, kq_db, file_status, err_logs
 
-# --- NEW FUNCTION: ALIEN 8X LOGIC ---
-def calculate_alien_8x_logic(df, top_6_names, limits_config, col_hist_used):
-    """Tính toán Alien 8x Alliance"""
+# --- [FIXED] ALIEN 8X LOGIC: LẤY CỘT 8X THẬT (INDEX 17) ---
+def calculate_alien_8x_logic(df, top_6_names, limits_config, col_hist_used=None):
+    """
+    Tính toán Alien 8x Alliance.
+    [FIX]: Lấy dữ liệu từ cột Index 17 (Cột R - Dàn 8X gốc) thay vì tìm tên cột "8X" (tránh cột phong độ).
+    """
     try:
-        def get_mem_set(name, limit):
+        def get_mem_set_8x_real(name, limit):
             row = df[df['MEMBER'] == name]
             if row.empty: return set()
-            val = row[col_hist_used].iloc[0] if col_hist_used in row.columns else ""
+            
+            # TRỰC TIẾP LẤY CỘT INDEX 17 (Cột R - Chứa dàn số 8X)
+            # Lưu ý: Nếu file có cấu trúc khác (ví dụ bị chèn cột), index này cần chỉnh.
+            # Với file "TH MB" của bạn, Cột R luôn là Index 17.
+            val = ""
+            if len(df.columns) > 17:
+                val = row.iloc[0, 17]
+            else:
+                # Fallback: Nếu không đủ cột, tìm cột tên 9X rồi lùi lại (hoặc tìm cột chứa nhiều số nhất)
+                pass 
+
             nums = get_nums(str(val))
+            # Nếu nums rỗng (do lỗi đọc cột phong độ "8x", "miss"...), thử fallback cột khác?
+            # Nhưng ở đây ta tin tưởng cột 17 là cột số.
+            
             return set(nums[:limit])
 
         l12 = limits_config.get('l12', 75)
@@ -268,16 +284,16 @@ def calculate_alien_8x_logic(df, top_6_names, limits_config, col_hist_used):
         l56 = limits_config.get('l56', 65)
 
         # Alliance 1: Top 1 (0), Top 6 (5), Top 4 (3)
-        s1 = get_mem_set(top_6_names[0], l12)
-        s6 = get_mem_set(top_6_names[5], l56)
-        s4 = get_mem_set(top_6_names[3], l34)
+        s1 = get_mem_set_8x_real(top_6_names[0], l12)
+        s6 = get_mem_set_8x_real(top_6_names[5], l56)
+        s4 = get_mem_set_8x_real(top_6_names[3], l34)
         c1 = Counter(list(s1) + list(s6) + list(s4))
         set_a1 = {n for n, c in c1.items() if c >= 2}
 
         # Alliance 2: Top 2 (1), Top 5 (4), Top 3 (2)
-        s2 = get_mem_set(top_6_names[1], l12)
-        s5 = get_mem_set(top_6_names[4], l56)
-        s3 = get_mem_set(top_6_names[2], l34)
+        s2 = get_mem_set_8x_real(top_6_names[1], l12)
+        s5 = get_mem_set_8x_real(top_6_names[4], l56)
+        s3 = get_mem_set_8x_real(top_6_names[2], l34)
         c2 = Counter(list(s2) + list(s5) + list(s3))
         set_a2 = {n for n, c in c2.items() if c >= 2}
 
@@ -466,7 +482,7 @@ def calculate_goc_3_logic(target_date, rolling_window, _cache, _kq_db, input_lim
     counts = Counter(all_nums)
     overlap_nums = [n for n, c in counts.items() if c >= 2]
     final_set = smart_trim_by_score(overlap_nums, df, p_map_dict, {}, target_limit)
-    return {"top3": top3, "dan_final": final_set, "source_col": col_hist}
+    return {"top3": top3, "dan_final": final_set, "source_col": col_hist, "top6_std": res_v24['top6_std']}
 
 @st.cache_data(show_spinner=False)
 def calculate_v24_final(target_date, rolling_window, _cache, _kq_db, limits_config, min_votes, score_std, score_mod, use_inverse, manual_groups=None, max_trim=None):
@@ -667,7 +683,7 @@ def main():
             last_d = max(data_cache.keys())
             tab1, tab2, tab3 = st.tabs(["📊 DỰ ĐOÁN (ANALYSIS)", "🔙 BACKTEST", "🎯 MATRIX"])
             
-            # --- TAB 1: PREDICTION (NÂNG CẤP HYBRID ĐỘNG + ALIEN 8X) ---
+            # --- TAB 1: PREDICTION (NÂNG CẤP HYBRID ĐỘNG + ALIEN 8X ROLLING) ---
             with tab1:
                 st.subheader(f"Dự đoán: {STRATEGY_MODE}")
                 if USE_ADAPTIVE: st.info("🧠 M Động: BẬT")
@@ -691,7 +707,7 @@ def main():
                         else: # Gốc 3
                             g3_res = calculate_goc_3_logic(target, ROLLING_WINDOW, data_cache, kq_db, st.session_state['G3_INPUT'], st.session_state['G3_TARGET'], curr_std, USE_INVERSE, MIN_VOTES)
                             if g3_res:
-                                res_curr = {'dan_goc': g3_res['dan_final'], 'dan_mod': [], 'dan_final': g3_res['dan_final'], 'source_col': g3_res['source_col']}
+                                res_curr = {'dan_goc': g3_res['dan_final'], 'dan_mod': [], 'dan_final': g3_res['dan_final'], 'source_col': g3_res['source_col'], 'top6_std': g3_res['top6_std']}
                                 err_curr = None
                             else: res_curr=None; err_curr="Lỗi"
 
@@ -709,35 +725,35 @@ def main():
                             screen_goc = res_curr['dan_goc'] 
                             hybrid_goc = sorted(list(set(hc_goc).intersection(set(screen_goc))))
 
-                        # 4. [NEW] TÍNH ALIEN 8X
+                        # 4. [NEW] TÍNH ALIEN 8X (CÓ ROLLING WINDOW)
                         alien_res = []
                         try:
-                            # Lấy top 6 member hiện tại
                             df_day = data_cache[target]['df']
-                            top_mem_df = get_elite_members(df_day, top_n=6, sort_by='score')
-                            if len(top_mem_df) >= 6:
-                                top_6_names = top_mem_df['MEMBER'].tolist()
-                                # Xác định cột lịch sử (source_col) để lấy dữ liệu. 
-                                # Nếu res_curr có source_col thì dùng, không thì tìm lại.
-                                src_col = res_curr.get('source_col') if res_curr else None
-                                if not src_col:
-                                    # Fallback tìm cột hôm qua
-                                    prev_d = target - timedelta(days=1)
-                                    src_col = data_cache[target]['hist_map'].get(prev_d)
-                                
-                                if src_col:
-                                    # Cấu hình cắt số cho Alien
-                                    alien_cfg = {'l12': L_TOP_12 if L_TOP_12 > 0 else 75,
-                                                 'l34': L_TOP_34 if L_TOP_34 > 0 else 70, 
-                                                 'l56': L_TOP_56 if L_TOP_56 > 0 else 65}
-                                    alien_res = calculate_alien_8x_logic(df_day, top_6_names, alien_cfg, src_col)
+                            top_6_names = []
+                            
+                            # [ROLLING] Ưu tiên lấy Top 6 Phong độ (Rolling) từ V24 nếu có
+                            if res_curr and 'top6_std' in res_curr and len(res_curr['top6_std']) >= 6:
+                                top_6_names = res_curr['top6_std']
+                            else:
+                                # Fallback: Top Điểm (Static)
+                                top_mem_df = get_elite_members(df_day, top_n=6, sort_by='score')
+                                if len(top_mem_df) >= 6:
+                                    top_6_names = top_mem_df['MEMBER'].tolist()
+                            
+                            if len(top_6_names) >= 6:
+                                # Cấu hình cắt số cho Alien
+                                alien_cfg = {'l12': L_TOP_12 if L_TOP_12 > 0 else 75,
+                                                'l34': L_TOP_34 if L_TOP_34 > 0 else 70, 
+                                                'l56': L_TOP_56 if L_TOP_56 > 0 else 65}
+                                alien_res = calculate_alien_8x_logic(df_day, top_6_names, alien_cfg)
                         except Exception as e:
-                            st.error(f"Lỗi tính Alien 8x: {e}")
+                            st.error(f"Lỗi Alien 8x: {e}")
 
                         st.session_state['run_result'] = {
                             'res_curr': res_curr, 'target': target, 'err': err_curr,
                             'hc_goc': hc_goc, 'screen_goc': screen_goc, 'hybrid_goc': hybrid_goc,
-                            'alien_res': alien_res
+                            'alien_res': alien_res,
+                            'alien_source': "Rolling" if res_curr and 'top6_std' in res_curr else "Static"
                         }
 
                 if 'run_result' in st.session_state and st.session_state['run_result']['target'] == target:
@@ -752,7 +768,8 @@ def main():
                         
                         # [NEW] HIỂN THỊ ALIEN 8X
                         alien_data = rr.get('alien_res', [])
-                        cols_main.append({"t": f"👽 Alien 8x ({len(alien_data)})", "d": alien_data})
+                        src_txt = "(Rolling)" if rr.get('alien_source') == "Rolling" else "(Static)"
+                        cols_main.append({"t": f"👽 Alien 8x {src_txt} ({len(alien_data)})", "d": alien_data})
 
                         if cols_main:
                             c_m = st.columns(len(cols_main))
@@ -784,7 +801,7 @@ def main():
                                 
                             pa2.render_pa2_preanalysis(res_curr=res_curr, res_hc=res_hc, hybrid_goc=hybrid_goc)
 
-            # --- TAB 2: BACKTEST (TÍCH HỢP ALIEN 8X) ---
+            # --- TAB 2: BACKTEST (TÍCH HỢP ALIEN 8X ROLLING) ---
             with tab2:
                 st.subheader("🔙 Backtest Chi Tiết (Single Mode + Alien 8x)")
                 
@@ -815,37 +832,55 @@ def main():
                             real_kq = kq_db[d]
                             row = {"Ngày": d.strftime("%d/%m"), "KQ": real_kq}
                             
-                            # -- Logic Alien 8x Backtest --
+                            # Cấu hình tham số cho V24
+                            run_s = {}; run_m = {}; run_l = {}; run_r = 10; is_goc3 = False
+                            res_bt_main = None
+
+                            if selected_cfg == "Màn hình hiện tại":
+                                run_s = {f'M{i}': st.session_state[f'std_{i}'] for i in range(11)}
+                                run_m = {f'M{i}': st.session_state[f'mod_{i}'] for i in range(11)}
+                                if STRATEGY_MODE == "🛡️ V24 Cổ Điển": run_l = {'l12': L_TOP_12, 'l34': L_TOP_34, 'l56': L_TOP_56, 'mod': LIMIT_MODIFIED}
+                                else: is_goc3 = True; inp = st.session_state.get('G3_INPUT', 75); tar = st.session_state.get('G3_TARGET', 70)
+                                run_r = ROLLING_WINDOW
+                            elif selected_cfg == "Gốc 3 (Test Input 75/Target 70)":
+                                is_goc3 = True; run_s = {f'M{i}': st.session_state[f'std_{i}'] for i in range(11)}; inp = 75; tar = 70; run_r = ROLLING_WINDOW
+                            elif selected_cfg in SCORES_PRESETS:
+                                run_s, run_m, run_l, run_r = get_preset_params(selected_cfg)
+
+                            if use_adaptive_bt and not (selected_cfg == "⚔️ Hybrid: HC(Gốc) + CH1(Gốc)"):
+                                run_s = get_adaptive_weights(d, run_s, data_cache, kq_db, 3, 1.5)
+                                if not is_goc3: run_m = get_adaptive_weights(d, run_m, data_cache, kq_db, 3, 1.5)
+
+                            # Chạy V24/Gốc3 để lấy kết quả + Top Rolling cho Alien
+                            if selected_cfg != "⚔️ Hybrid: HC(Gốc) + CH1(Gốc)":
+                                if is_goc3:
+                                    res_bt_main = calculate_goc_3_logic(d, run_r, data_cache, kq_db, inp, tar, run_s, USE_INVERSE, MIN_VOTES)
+                                else:
+                                    res_bt_main = calculate_v24_logic_only(d, run_r, data_cache, kq_db, run_l, MIN_VOTES, run_s, run_m, USE_INVERSE, None, max_trim=MAX_TRIM_NUMS)
+                            
+                            # -- Logic Alien 8x Backtest (Ké Rolling) --
                             if test_alien:
                                 try:
                                     df_bt = data_cache[d]['df']
-                                    top_bt = get_elite_members(df_bt, top_n=6, sort_by='score')
-                                    if len(top_bt) >= 6:
-                                        # Tìm cột source
-                                        prev_d = d - timedelta(days=1)
-                                        # Tìm lùi tối đa 3 ngày
-                                        src_col_bt = None
-                                        for k in range(1,4):
-                                            pd_check = d - timedelta(days=k)
-                                            if pd_check in data_cache and d in data_cache[d]['hist_map']: # Wait, hist_map key is prev date
-                                                # Correct way: Look at current day's hist_map
-                                                # The key in hist_map is the DATE of the column content
-                                                # We want the column that corresponds to prev_d
-                                                for h_date, h_col in data_cache[d]['hist_map'].items():
-                                                    if h_date < d: # Lấy ngày gần nhất
-                                                        src_col_bt = h_col; break
-                                                if src_col_bt: break
-                                        
-                                        if src_col_bt:
-                                            alien_cfg_bt = {'l12': 75, 'l34': 70, 'l56': 65}
-                                            alien_res_bt = calculate_alien_8x_logic(df_bt, top_bt['MEMBER'].tolist(), alien_cfg_bt, src_col_bt)
-                                            row.update({"Alien 8x": f"{check_win(real_kq, alien_res_bt)} ({len(alien_res_bt)})"})
-                                        else: row.update({"Alien 8x": "N/A"})
+                                    top_bt_names = []
+                                    # Ké Rolling từ kết quả chính
+                                    if res_bt_main and 'top6_std' in res_bt_main and len(res_bt_main['top6_std']) >= 6:
+                                        top_bt_names = res_bt_main['top6_std']
+                                    else:
+                                        # Fallback Static nếu chạy Hybrid hoặc lỗi
+                                        top_static = get_elite_members(df_bt, top_n=6, sort_by='score')
+                                        if len(top_static) >= 6: top_bt_names = top_static['MEMBER'].tolist()
+                                    
+                                    if len(top_bt_names) >= 6:
+                                        alien_cfg_bt = {'l12': 75, 'l34': 70, 'l56': 65}
+                                        alien_res_bt = calculate_alien_8x_logic(df_bt, top_bt_names, alien_cfg_bt)
+                                        row.update({"Alien 8x": f"{check_win(real_kq, alien_res_bt)} ({len(alien_res_bt)})"})
                                     else: row.update({"Alien 8x": "N/A"})
                                 except: row.update({"Alien 8x": "Err"})
 
-                            # -- Logic Chính --
+                            # -- Ghi log kết quả chính --
                             if selected_cfg == "⚔️ Hybrid: HC(Gốc) + CH1(Gốc)":
+                                # ... (Logic Hybrid cũ giữ nguyên)
                                 s_hc, m_hc, l_hc, r_hc = get_preset_params("Hard Core (Gốc)")
                                 s_ch1, m_ch1, l_ch1, r_ch1 = get_preset_params("CH1: Bám Đuôi (Gốc)")
                                 if use_adaptive_bt:
@@ -859,33 +894,13 @@ def main():
                                     row.update({"HC Gốc": f"{check_win(real_kq, fin_hc)} ({len(fin_hc)})", "CH1 Gốc": f"{check_win(real_kq, fin_ch1)} ({len(fin_ch1)})", "Hybrid": f"{check_win(real_kq, fin_hyb)} ({len(fin_hyb)})"})
                                     logs.append(row)
                             else:
-                                run_s = {}; run_m = {}; run_l = {}; run_r = 10; is_goc3 = False
-                                if selected_cfg == "Màn hình hiện tại":
-                                    run_s = {f'M{i}': st.session_state[f'std_{i}'] for i in range(11)}
-                                    run_m = {f'M{i}': st.session_state[f'mod_{i}'] for i in range(11)}
-                                    if STRATEGY_MODE == "🛡️ V24 Cổ Điển": run_l = {'l12': L_TOP_12, 'l34': L_TOP_34, 'l56': L_TOP_56, 'mod': LIMIT_MODIFIED}
-                                    else: is_goc3 = True; inp = st.session_state.get('G3_INPUT', 75); tar = st.session_state.get('G3_TARGET', 70)
-                                    run_r = ROLLING_WINDOW
-                                elif selected_cfg == "Gốc 3 (Test Input 75/Target 70)":
-                                    is_goc3 = True; run_s = {f'M{i}': st.session_state[f'std_{i}'] for i in range(11)}; inp = 75; tar = 70; run_r = ROLLING_WINDOW
-                                elif selected_cfg in SCORES_PRESETS:
-                                    run_s, run_m, run_l, run_r = get_preset_params(selected_cfg)
-                                
-                                if use_adaptive_bt:
-                                    run_s = get_adaptive_weights(d, run_s, data_cache, kq_db, 3, 1.5)
-                                    if not is_goc3: run_m = get_adaptive_weights(d, run_m, data_cache, kq_db, 3, 1.5)
-                                
-                                if is_goc3:
-                                    res = calculate_goc_3_logic(d, run_r, data_cache, kq_db, inp, tar, run_s, USE_INVERSE, MIN_VOTES)
-                                    if res:
-                                        fin = res['dan_final']
+                                if res_bt_main:
+                                    if is_goc3:
+                                        fin = res_bt_main['dan_final']
                                         row.update({"Gốc 3": f"{check_win(real_kq, fin)} ({len(fin)})", "Final": f"{check_win(real_kq, fin)} ({len(fin)})"})
-                                        logs.append(row)
-                                else:
-                                    res = calculate_v24_logic_only(d, run_r, data_cache, kq_db, run_l, MIN_VOTES, run_s, run_m, USE_INVERSE, None, max_trim=MAX_TRIM_NUMS)
-                                    if res:
-                                        row.update({"Gốc": f"{check_win(real_kq, res['dan_goc'])} ({len(res['dan_goc'])})", "Mod": f"{check_win(real_kq, res['dan_mod'])} ({len(res['dan_mod'])})", "Final": f"{check_win(real_kq, res['dan_final'])} ({len(res['dan_final'])})"})
-                                        logs.append(row)
+                                    else:
+                                        row.update({"Gốc": f"{check_win(real_kq, res_bt_main['dan_goc'])} ({len(res_bt_main['dan_goc'])})", "Mod": f"{check_win(real_kq, res_bt_main['dan_mod'])} ({len(res_bt_main['dan_mod'])})", "Final": f"{check_win(real_kq, res_bt_main['dan_final'])} ({len(res_bt_main['dan_final'])})"})
+                                    logs.append(row)
 
                         bar.empty()
                         if logs:
