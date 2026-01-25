@@ -15,14 +15,14 @@ import pa2_preanalysis_text as pa2
 # 1. CẤU HÌNH HỆ THỐNG
 # ==============================================================================
 st.set_page_config(
-    page_title="Quang Pro V62 - Alien 8x Rolling Hunter", 
+    page_title="Quang Pro V62 - Alien 8x Weighted Cut", 
     page_icon="👽", 
     layout="wide",
     initial_sidebar_state="collapsed" 
 )
 
-st.title("🛡️ Quang Handsome: V62 + Alien 8x (Rolling Hunter)")
-st.caption("🚀 Fix: Alien 8x theo Phong Độ Rolling (Ưu tiên Wins -> Rank) | Cắt Max Trim | Data Cột 8X")
+st.title("🛡️ Quang Handsome: V62 + Alien 8x (Weighted Cut)")
+st.caption("🚀 Fix: Alien 8x lấy từ cột 8X -> Chấm điểm theo trọng số M (Custom) -> Cắt Top")
 
 CONFIG_FILE = 'config.json'
 
@@ -262,100 +262,83 @@ def load_data_v24(files):
     return cache, kq_db, file_status, err_logs
 
 # ==============================================================================
-# 3. [NEW] LOGIC ALIEN 8X ROLLING (SỬA ĐỔI)
+# 3. [FIX] ALIEN 8X: LẤY 8X -> MAP CỘT M (CUSTOM) -> CẮT TOP SCORE
 # ==============================================================================
 
-def get_top6_rolling_8x(df, target_date, rolling_days, score_std):
+def calculate_alien_8x_logic(df, top_6_names, limits_config, score_std):
     """
-    Tìm Top 6 Rolling:
-    1. Ưu tiên: Wins (Số ngày ăn 8x trong Window).
-    2. Tie-Breaker: Rank số (Dùng SCORE_SORT tích lũy làm tham chiếu Rank).
-    """
-    try:
-        # 1. Xác định các cột lịch sử
-        valid_hist_cols = []
-        check_d = target_date - timedelta(days=1)
-        count = 0
-        while count < rolling_days:
-            d_str_slash = check_d.strftime("%d/%m")
-            d_str_hyphen = check_d.strftime("%d-%m")
-            found = False
-            for c in df.columns:
-                if (d_str_slash in str(c).upper() or d_str_hyphen in str(c).upper()) and "TV TOP" not in str(c).upper():
-                    valid_hist_cols.append(c)
-                    found = True
-                    break
-            if found: count += 1
-            check_d -= timedelta(days=1)
-            if (target_date - check_d).days > 40: break 
-
-        # 2. Duyệt thành viên & Tính toán
-        member_stats = []
-        
-        for idx, row in df.iterrows():
-            mem_name = row.get('MEMBER', '')
-            if pd.isna(mem_name) or str(mem_name).strip() == '': continue
-
-            # A. Tính Rolling Wins (Phong độ)
-            wins = 0
-            for h_col in valid_hist_cols:
-                val = str(row[h_col]).upper()
-                if 'X' in val and not any(bad in val for bad in ['XIT', 'MISS', 'TRUOT', 'NGHI', 'N']):
-                    wins += 1
-            
-            # B. Rank (Tổng điểm tích lũy)
-            current_quality_score = row.get('SCORE_SORT', 0)
-
-            member_stats.append({
-                'name': mem_name,
-                'wins': wins,
-                'score': current_quality_score
-            })
-
-        # 3. Sắp xếp: Wins (Cao -> Thấp) -> Score (Cao -> Thấp)
-        sorted_mems = sorted(member_stats, key=lambda x: (x['wins'], x['score']), reverse=True)
-        return [m['name'] for m in sorted_mems[:6]]
-
-    except Exception as e: return []
-
-def calculate_alien_8x_logic(df, top_6_names, limits_config):
-    """
-    Alien 8x: Lấy dữ liệu cột '8X' (Ưu tiên tìm tên, Fallback index 17).
+    Alien 8x Fix (Weighted Cut):
+    1. Lấy toàn bộ số từ cột '8X' của thành viên.
+    2. Đối chiếu số đó thuộc M nào (từ cột M0-M9).
+    3. Gán điểm (Weight) dựa trên `score_std` (Cấu hình màn hình).
+    4. Sắp xếp (Điểm cao -> Thấp) và cắt lấy Top Limit.
     """
     try:
-        def get_mem_set_8x(name, limit):
+        # Chuẩn bị Map điểm cấu hình (ví dụ: {'M9': 50, 'M0': 0})
+        score_std_tuple = tuple(score_std.items())
+
+        def get_mem_set_weighted_cut(name, limit):
             if 'MEMBER' not in df.columns: return set()
             row = df[df['MEMBER'] == name]
             if row.empty: return set()
-            
-            # --- TÌM CỘT 8X THÔNG MINH ---
-            col_target = None
-            for c in df.columns:
-                if str(c).strip().upper() == '8X':
-                    col_target = c; break
-            
-            val = ""
-            if col_target: val = row.iloc[0][col_target]
-            elif len(df.columns) > 17: val = row.iloc[0, 17] # Fallback
-            
-            nums = get_nums(str(val))
-            return set(nums[:limit])
+            row_vals = row.iloc[0]
 
+            # 1. Lấy dữ liệu thô từ cột 8X (Nguồn)
+            col_8x = None
+            for c in df.columns:
+                if str(c).strip().upper() == '8X': col_8x = c; break
+            
+            raw_nums_8x = []
+            if col_8x: raw_nums_8x = get_nums(str(row_vals[col_8x]))
+            elif len(df.columns) > 17: raw_nums_8x = get_nums(str(row_vals.iloc[17]))
+            
+            if not raw_nums_8x: return set()
+
+            # 2. Quét các cột M để biết số nào thuộc M nào -> Gán điểm
+            num_score_map = {}
+            for col in df.columns:
+                # Lấy điểm cấu hình của cột này (Ví dụ cột M9 có score=50)
+                s_p = get_col_score(col, score_std_tuple)
+                if s_p > 0:
+                    # Lấy các số trong cột M đó
+                    m_nums = get_nums(str(row_vals[col]))
+                    for n in m_nums:
+                        # Gán điểm (Nếu số thuộc nhiều M, lấy điểm lớn nhất)
+                        num_score_map[n] = max(num_score_map.get(n, 0), s_p)
+            
+            # 3. Chấm điểm cho từng số trong dàn 8X
+            scored_list = []
+            for n in raw_nums_8x:
+                # Điểm mặc định = 0 nếu không tìm thấy trong các cột M
+                s = num_score_map.get(n, 0)
+                scored_list.append((n, s))
+            
+            # 4. Sắp xếp: Điểm cao -> Thấp. Nếu bằng điểm, giữ thứ tự hoặc sort theo số
+            # Ở đây sort theo: Score (DESC), Num (ASC)
+            scored_list.sort(key=lambda x: (x[1], x[0]), reverse=True)
+            
+            # 5. Cắt lấy Top Limit
+            final_nums = [item[0] for item in scored_list[:limit]]
+            return set(final_nums)
+
+        # Lấy limit từ cấu hình
         l12 = limits_config.get('l12', 75)
         l34 = limits_config.get('l34', 70)
         l56 = limits_config.get('l56', 65)
 
         if len(top_6_names) < 6: return []
         
-        s1 = get_mem_set_8x(top_6_names[0], l12)
-        s6 = get_mem_set_8x(top_6_names[5], l56)
-        s4 = get_mem_set_8x(top_6_names[3], l34)
+        # Nhóm 1: 1-6-4
+        s1 = get_mem_set_weighted_cut(top_6_names[0], l12)
+        s6 = get_mem_set_weighted_cut(top_6_names[5], l56)
+        s4 = get_mem_set_weighted_cut(top_6_names[3], l34)
         c1 = Counter(list(s1) + list(s6) + list(s4))
         set_a1 = {n for n, c in c1.items() if c >= 2}
 
-        s2 = get_mem_set_8x(top_6_names[1], l12)
-        s5 = get_mem_set_8x(top_6_names[4], l56)
-        s3 = get_mem_set_8x(top_6_names[2], l34)
+        # Nhóm 2: 2-5-3
+        s2 = get_mem_set_weighted_cut(top_6_names[1], l12)
+        s5 = get_mem_set_weighted_cut(top_6_names[4], l56)
+        s3 = get_mem_set_weighted_cut(top_6_names[2], l34)
         c2 = Counter(list(s2) + list(s5) + list(s3))
         set_a2 = {n for n, c in c2.items() if c >= 2}
 
@@ -364,7 +347,8 @@ def calculate_alien_8x_logic(df, top_6_names, limits_config):
     except: return []
 
 # ==============================================================================
-# ... (TIẾP TỤC CÁC HÀM CŨ Ở PHẦN 2) ...
+# HẾT PHẦN 1
+# ==============================================================================
 # ==============================================================================
 # TIẾP THEO PHẦN 1... CÁC HÀM HỖ TRỢ VÀ MAIN APP
 # ==============================================================================
@@ -602,6 +586,40 @@ def save_config(config_data):
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f: json.dump(config_data, f, indent=4); return True
     except: return False
 
+def get_top6_rolling_8x(df, target_date, rolling_days, score_std):
+    try:
+        valid_hist_cols = []
+        check_d = target_date - timedelta(days=1)
+        count = 0
+        while count < rolling_days:
+            d_str_slash = check_d.strftime("%d/%m")
+            d_str_hyphen = check_d.strftime("%d-%m")
+            found = False
+            for c in df.columns:
+                if (d_str_slash in str(c).upper() or d_str_hyphen in str(c).upper()) and "TV TOP" not in str(c).upper():
+                    valid_hist_cols.append(c)
+                    found = True
+                    break
+            if found: count += 1
+            check_d -= timedelta(days=1)
+            if (target_date - check_d).days > 40: break 
+
+        member_stats = []
+        for idx, row in df.iterrows():
+            mem_name = row.get('MEMBER', '')
+            if pd.isna(mem_name) or str(mem_name).strip() == '': continue
+            wins = 0
+            for h_col in valid_hist_cols:
+                val = str(row[h_col]).upper()
+                if 'X' in val and not any(bad in val for bad in ['XIT', 'MISS', 'TRUOT', 'NGHI', 'N']):
+                    wins += 1
+            current_quality_score = row.get('SCORE_SORT', 0)
+            member_stats.append({'name': mem_name, 'wins': wins, 'score': current_quality_score})
+
+        sorted_mems = sorted(member_stats, key=lambda x: (x['wins'], x['score']), reverse=True)
+        return [m['name'] for m in sorted_mems[:6]]
+    except: return []
+
 # ==============================================================================
 # 3. GIAO DIỆN CHÍNH (MAIN APP) - ĐÃ CẬP NHẬT LOGIC ALIEN
 # ==============================================================================
@@ -785,36 +803,34 @@ def main():
                             screen_goc = res_curr['dan_goc'] 
                             hybrid_goc = sorted(list(set(hc_goc).intersection(set(screen_goc))))
 
-                        # 4. TÍNH ALIEN 8X (ROLLING + TIE-BREAK SCORE)
+                        # 4. TÍNH ALIEN 8X (FIX: LẤY 8X -> CHẤM ĐIỂM THEO M -> CẮT TOP)
                         alien_res = []
                         alien_source_msg = "Static"
                         try:
                             df_day = data_cache[target]['df']
                             top_6_names = []
-                            
-                            # Cửa sổ trượt
                             r_win = st.session_state.get('ROLLING_WINDOW', 5)
                             
-                            # --- GỌI HÀM LỌC MỚI ---
+                            # Lọc Top 6 Rolling
                             top_6_rolling = get_top6_rolling_8x(df_day, target, r_win, curr_std)
                             
                             if top_6_rolling and len(top_6_rolling) >= 6:
                                 top_6_names = top_6_rolling
                                 alien_source_msg = f"Rolling {r_win}d"
                             else:
-                                # Fallback
                                 top_mem_df = get_elite_members(df_day, top_n=6, sort_by='score')
                                 if not top_mem_df.empty and len(top_mem_df) >= 6:
                                     top_6_names = top_mem_df['MEMBER'].tolist()
                             
                             if len(top_6_names) >= 6:
-                                # Cấu hình cắt số
                                 alien_cfg = {'l12': L_TOP_12 if L_TOP_12 > 0 else 75,
                                              'l34': L_TOP_34 if L_TOP_34 > 0 else 70, 
                                              'l56': L_TOP_56 if L_TOP_56 > 0 else 65}
-                                alien_res = calculate_alien_8x_logic(df_day, top_6_names, alien_cfg)
                                 
-                                # Cắt Max Trim (Xử lý số lượng lớn bằng M-Score)
+                                # [QUAN TRỌNG]: Truyền curr_std để chấm điểm M
+                                alien_res = calculate_alien_8x_logic(df_day, top_6_names, alien_cfg, curr_std)
+                                
+                                # Trim nếu quá dài
                                 if len(alien_res) > MAX_TRIM_NUMS:
                                     trim_p_map = {}
                                     score_std_tuple = tuple(curr_std.items())
@@ -843,7 +859,6 @@ def main():
                         if show_goc: cols_main.append({"t": f"{t_lbl} ({len(res['dan_goc'])})", "d": res['dan_goc']})
                         if show_final: cols_main.append({"t": f"Final ({len(res['dan_final'])})", "d": res['dan_final']})
                         
-                        # ALIEN 8X
                         alien_data = rr.get('alien_res', [])
                         src_txt = rr.get('alien_source', '')
                         cols_main.append({"t": f"👽 Alien 8x ({src_txt}) ({len(alien_data)})", "d": alien_data})
@@ -877,7 +892,7 @@ def main():
                                 
                             pa2.render_pa2_preanalysis(res_curr=res_curr, res_hc=res_hc, hybrid_goc=hybrid_goc)
 
-            # --- TAB 2: BACKTEST (TÍCH HỢP ALIEN 8X ROLLING) ---
+            # --- TAB 2: BACKTEST (UPDATED ALIEN) ---
             with tab2:
                 st.subheader("🔙 Backtest Chi Tiết (Single Mode + Alien 8x)")
                 c_bt_1, c_bt_2 = st.columns([1, 2])
@@ -932,7 +947,7 @@ def main():
                                 else:
                                     res_bt_main = calculate_v24_logic_only(d, run_r, data_cache, kq_db, run_l, MIN_VOTES, run_s, run_m, USE_INVERSE, None, max_trim=MAX_TRIM_NUMS)
                             
-                            # -- Alien 8x Backtest --
+                            # -- Alien 8x Backtest (Fix: Truyền run_s) --
                             if test_alien:
                                 try:
                                     df_bt = data_cache[d]['df']
@@ -940,13 +955,13 @@ def main():
                                     top_bt = get_top6_rolling_8x(df_bt, d, r_win_bt, run_s)
                                     
                                     if top_bt and len(top_bt) >= 6:
-                                        # Limit
                                         alien_cfg_bt = {'l12': 75, 'l34': 70, 'l56': 65}
                                         if selected_cfg == "Màn hình hiện tại":
                                              alien_cfg_bt = {'l12': L_TOP_12, 'l34': L_TOP_34, 'l56': L_TOP_56}
                                         
-                                        alien_res_bt = calculate_alien_8x_logic(df_bt, top_bt, alien_cfg_bt)
-                                        # Trim if needed
+                                        # [FIX]: Gọi hàm với run_s để chấm điểm M
+                                        alien_res_bt = calculate_alien_8x_logic(df_bt, top_bt, alien_cfg_bt, run_s)
+                                        
                                         if len(alien_res_bt) > 75:
                                             trim_p_map = {}
                                             score_std_tuple = tuple(run_s.items())
