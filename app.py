@@ -12,17 +12,17 @@ import numpy as np
 import pa2_preanalysis_text as pa2
 
 # ==============================================================================
-# 1. CẤU HÌNH HỆ THỐNG & PRESETS
+# 1. CẤU HÌNH HỆ THỐNG
 # ==============================================================================
 st.set_page_config(
-    page_title="Quang Pro V62 - Dynamic Hybrid + Alien 8x", 
-    page_icon="🛡️", 
+    page_title="Quang Pro V62 - Alien 8x Final", 
+    page_icon="👽", 
     layout="wide",
     initial_sidebar_state="collapsed" 
 )
 
-st.title("🛡️ Quang Handsome: V62 Dynamic Hybrid + Alien 8x")
-st.caption("🚀 Tính năng mới: Hybrid thay đổi theo tinh chỉnh màn hình | Backtest Đơn | M Động | Alien 8x Alliance (Fix Data Source)")
+st.title("🛡️ Quang Handsome: V62 + Alien 8x (Custom)")
+st.caption("🚀 Fix lỗi đọc tên cột | Alien 8x chạy theo cấu hình màn hình | Rolling Window")
 
 CONFIG_FILE = 'config.json'
 
@@ -60,7 +60,7 @@ RE_SLASH_DATE = re.compile(r'(\d{1,2})[\.\-/](\d{1,2})')
 BAD_KEYWORDS = frozenset(['N', 'NGHI', 'SX', 'XIT', 'MISS', 'TRUOT', 'NGHỈ', 'LỖI'])
 
 # ==============================================================================
-# 2. CORE FUNCTIONS
+# 2. HÀM XỬ LÝ DỮ LIỆU
 # ==============================================================================
 
 @lru_cache(maxsize=10000)
@@ -162,6 +162,7 @@ def find_header_row(df_preview):
         if any(k in row_str for k in keywords): return idx
     return 3
 
+# --- HÀM LOAD DATA ĐÃ SỬA LỖI (FIX RENAMING) ---
 @st.cache_data(ttl=600, show_spinner=False)
 def load_data_v24(files):
     cache = {}; kq_db = {}; err_logs = []; file_status = []
@@ -221,6 +222,16 @@ def load_data_v24(files):
 
             for t_date, df in dfs_to_process:
                 df.columns = [str(c).strip().upper().replace('\ufeff', '') for c in df.columns]
+                
+                # --- [FIX QUAN TRỌNG] ĐỔI TÊN CỘT THÀNH VIÊN -> MEMBER ---
+                rename_dict = {}
+                for col in df.columns:
+                    cup = col.upper().strip()
+                    if cup in ["THÀNH VIÊN", "HỌ VÀ TÊN", "NICK", "TV TOP"]:
+                        rename_dict[col] = "MEMBER"
+                if rename_dict: df = df.rename(columns=rename_dict)
+                # --------------------------------------------------------
+
                 score_col = next((c for c in df.columns if 'Đ9' in c or 'DIEM' in c or 'ĐIỂM' in c), None)
                 if score_col: df['SCORE_SORT'] = pd.to_numeric(df[score_col], errors='coerce').fillna(0)
                 else: df['SCORE_SORT'] = 0
@@ -252,45 +263,47 @@ def load_data_v24(files):
         except Exception as e: err_logs.append(f"Lỗi '{file.name}': {str(e)}"); continue
     return cache, kq_db, file_status, err_logs
 
-# --- [FIXED] ALIEN 8X LOGIC: LẤY CỘT 8X THẬT (INDEX 17) ---
+# --- HÀM ALIEN 8X ĐÃ SỬA: LẤY CỘT 8X (HOẶC INDEX 17) & CẮT THEO MÀN HÌNH ---
 def calculate_alien_8x_logic(df, top_6_names, limits_config, col_hist_used=None):
-    """
-    Tính toán Alien 8x Alliance.
-    [FIX]: Lấy dữ liệu từ cột Index 17 (Cột R - Dàn 8X gốc) thay vì tìm tên cột "8X" (tránh cột phong độ).
-    """
     try:
         def get_mem_set_8x_real(name, limit):
+            # Giờ đây cột MEMBER chắc chắn tồn tại nhờ fix ở trên
+            if 'MEMBER' not in df.columns: return set()
             row = df[df['MEMBER'] == name]
             if row.empty: return set()
             
-            # TRỰC TIẾP LẤY CỘT INDEX 17 (Cột R - Chứa dàn số 8X)
-            # Lưu ý: Nếu file có cấu trúc khác (ví dụ bị chèn cột), index này cần chỉnh.
-            # Với file "TH MB" của bạn, Cột R luôn là Index 17.
             val = ""
-            if len(df.columns) > 17:
-                val = row.iloc[0, 17]
-            else:
-                # Fallback: Nếu không đủ cột, tìm cột tên 9X rồi lùi lại (hoặc tìm cột chứa nhiều số nhất)
-                pass 
+            # Ưu tiên tìm cột tên "8X" (thường là Index 17)
+            col_8x = next((c for c in df.columns if str(c).upper().strip() == '8X'), None)
+            
+            # Kiểm tra xem cột 8X đó có chứa số không (hay là rác 8x, miss)
+            # Nếu cột 8X chứa chuỗi dài > 10 ký tự số -> Tin tưởng
+            valid_8x = False
+            if col_8x:
+                raw_val = str(row.iloc[0][col_8x])
+                if len(get_nums(raw_val)) > 10: 
+                    val = raw_val
+                    valid_8x = True
+            
+            # Nếu không tìm thấy cột 8X ngon, fallback về cột Index 17
+            if not valid_8x and len(df.columns) > 17:
+                 val = row.iloc[0, 17]
 
             nums = get_nums(str(val))
-            # Nếu nums rỗng (do lỗi đọc cột phong độ "8x", "miss"...), thử fallback cột khác?
-            # Nhưng ở đây ta tin tưởng cột 17 là cột số.
-            
+            # Cắt theo cấu hình màn hình (limit)
             return set(nums[:limit])
 
+        # Lấy giới hạn từ màn hình (được truyền vào qua limits_config)
         l12 = limits_config.get('l12', 75)
         l34 = limits_config.get('l34', 70)
         l56 = limits_config.get('l56', 65)
 
-        # Alliance 1: Top 1 (0), Top 6 (5), Top 4 (3)
         s1 = get_mem_set_8x_real(top_6_names[0], l12)
         s6 = get_mem_set_8x_real(top_6_names[5], l56)
         s4 = get_mem_set_8x_real(top_6_names[3], l34)
         c1 = Counter(list(s1) + list(s6) + list(s4))
         set_a1 = {n for n, c in c1.items() if c >= 2}
 
-        # Alliance 2: Top 2 (1), Top 5 (4), Top 3 (2)
         s2 = get_mem_set_8x_real(top_6_names[1], l12)
         s5 = get_mem_set_8x_real(top_6_names[4], l56)
         s3 = get_mem_set_8x_real(top_6_names[2], l34)
@@ -299,6 +312,9 @@ def calculate_alien_8x_logic(df, top_6_names, limits_config, col_hist_used=None)
 
         return sorted(list(set_a1.intersection(set_a2)))
     except: return []
+# ==============================================================================
+# TIẾP THEO PHẦN 1...
+# ==============================================================================
 
 def fast_get_top_nums(df, p_map_dict, s_map_dict, top_n, min_v, inverse):
     cols_in_scope = sorted(list(set(p_map_dict.keys()) | set(s_map_dict.keys())))
@@ -437,9 +453,6 @@ def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits
         "top6_std": top6_std, "best_mod": best_mod_grp, "dan_goc": final_original, 
         "dan_mod": final_modified, "dan_final": final_intersect, "source_col": col_hist_used
     }
-# ==============================================================================
-# TIẾP THEO PHẦN 1...
-# ==============================================================================
 
 # --- GỐC 3 LOGIC (CÓ SMART CUT) ---
 def smart_trim_by_score(number_list, df, p_map, s_map, target_size):
@@ -725,7 +738,7 @@ def main():
                             screen_goc = res_curr['dan_goc'] 
                             hybrid_goc = sorted(list(set(hc_goc).intersection(set(screen_goc))))
 
-                        # 4. [NEW] TÍNH ALIEN 8X (CÓ ROLLING WINDOW)
+                        # 4. TÍNH ALIEN 8X (CÓ ROLLING WINDOW)
                         alien_res = []
                         try:
                             df_day = data_cache[target]['df']
@@ -872,7 +885,11 @@ def main():
                                         if len(top_static) >= 6: top_bt_names = top_static['MEMBER'].tolist()
                                     
                                     if len(top_bt_names) >= 6:
+                                        # Lấy config cắt từ màn hình (nếu là chế độ hiện tại) hoặc mặc định
                                         alien_cfg_bt = {'l12': 75, 'l34': 70, 'l56': 65}
+                                        if selected_cfg == "Màn hình hiện tại" and STRATEGY_MODE == "🛡️ V24 Cổ Điển":
+                                             alien_cfg_bt = {'l12': L_TOP_12, 'l34': L_TOP_34, 'l56': L_TOP_56}
+                                        
                                         alien_res_bt = calculate_alien_8x_logic(df_bt, top_bt_names, alien_cfg_bt)
                                         row.update({"Alien 8x": f"{check_win(real_kq, alien_res_bt)} ({len(alien_res_bt)})"})
                                     else: row.update({"Alien 8x": "N/A"})
@@ -880,7 +897,6 @@ def main():
 
                             # -- Ghi log kết quả chính --
                             if selected_cfg == "⚔️ Hybrid: HC(Gốc) + CH1(Gốc)":
-                                # ... (Logic Hybrid cũ giữ nguyên)
                                 s_hc, m_hc, l_hc, r_hc = get_preset_params("Hard Core (Gốc)")
                                 s_ch1, m_ch1, l_ch1, r_ch1 = get_preset_params("CH1: Bám Đuôi (Gốc)")
                                 if use_adaptive_bt:
