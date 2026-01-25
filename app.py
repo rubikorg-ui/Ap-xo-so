@@ -421,9 +421,9 @@ def calculate_goc_3_logic(target_date, rolling_window, _cache, _kq_db, input_lim
     return {"top3": top3, "dan_final": final_set, "source_col": col_hist}
 
 # --- 🛡️ CHIẾN THUẬT MỚI: ALLIANCE 8X (GIAO THOA 1-6-4 & 2-5-3) ---
+# TAO THÊM ĐÚNG CÁI NÀY, KHÔNG THÊM E
 def calculate_8x_alliance_custom(df_target, top_6_names, limits_config, col_name="8X", min_v=2):
     def get_set_from_member(name, limit):
-        # Lưu ý: Cột 15 là Tên, Cột 17 là Dàn 8X (hoặc cột khác tuỳ chọn)
         m_row = df_target[df_target.iloc[:, 15].astype(str).str.strip() == name]
         if m_row.empty: return set()
         c_idx = 17 if col_name == "8X" else 27
@@ -617,7 +617,7 @@ if uploaded_files:
 
         with tab_backtest:
             st.subheader("📊 Backtest Hệ thống")
-            # CHỌN NGÀY VÀ DÀN BACKTEST
+            # CHỌN NGÀY VÀ DÀN BACKTEST (ĐẦY ĐỦ CỦA ÔNG)
             bt_dates_all = sorted([d for d in data_cache.keys() if d in kq_db])
             if bt_dates_all:
                 col_b1, col_b2 = st.columns(2)
@@ -643,7 +643,7 @@ if uploaded_files:
 
         with tab_manual:
             st.subheader("🛠️ Công cụ tạo dàn thủ công")
-            # CÔNG CỤ THỦ CÔNG ĐẦY ĐỦ CỘT
+            # CÔNG CỤ THỦ CÔNG ĐẦY ĐỦ (STT, MEMBER, SCORE)
             target_d = st.selectbox("Chọn ngày dữ liệu:", all_dates, key="manual_d")
             if target_d:
                 df_target = data_cache[target_d]['df']
@@ -654,6 +654,7 @@ if uploaded_files:
                 
                 input_df = get_elite_members(df_target, top_n=top_n_select, sort_by=filter_mode)
                 with st.expander("📋 Danh sách Cao thủ"):
+                    # Cột chính xác của ông đây
                     display_cols = ['STT', 'THÀNH VIÊN', 'SCORE_SORT'] if 'THÀNH VIÊN' in input_df.columns else input_df.columns
                     st.dataframe(input_df[display_cols], use_container_width=True)
                 
