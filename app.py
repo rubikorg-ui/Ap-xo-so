@@ -137,39 +137,55 @@ def parse_date_smart(col_str, f_m, f_y):
         except: return None
     return None
 
-# --- HÀM NÀY ĐÃ ĐƯỢC FIX ĐỂ ĐỌC FILE TÊN NGẮN ---
+# --- HÀM NÀY ĐÃ ĐƯỢC FIX MẠNH MẼ (V3) ---
 def extract_meta_from_filename(filename):
-    clean_name = filename.upper().replace(".CSV", "").replace(".XLSX", "")
-    clean_name = re.sub(r'\s*-\s*', '-', clean_name) 
+    """
+    Phiên bản V3 (Final): Xử lý triệt để file tên ngắn, bất chấp khoảng trắng thừa.
+    """
+    # 1. Chuẩn hóa tên file: Chuyển về chữ hoa, xóa khoảng trắng thừa 2 đầu
+    s = filename.upper().strip()
     
-    # 1. Tìm Năm
-    y_match = re.search(r'202[0-9]', clean_name)
-    y_global = int(y_match.group(0)) if y_match else datetime.datetime.now().year
+    # 2. Xóa đuôi file bằng Regex (xử lý cả trường hợp ".csv " có dấu cách)
+    s = re.sub(r'\.CSV\s*$', '', s)
+    s = re.sub(r'\.XLSX\s*$', '', s)
     
-    # 2. Tìm Tháng
-    m_match = re.search(r'(?:THANG|THÁNG|T)[^0-9]*(\d{1,2})', clean_name)
-    m_global = int(m_match.group(1)) if m_match else 12
+    # 3. Chuẩn hóa dấu gạch ngang (Biến " - " thành "-")
+    s = re.sub(r'\s*-\s*', '-', s)
     
-    # 3. Ưu tiên 1: Tìm ngày đầy đủ (1.1.2026)
-    full_date_match = re.search(r'(\d{1,2})[\.\-](\d{1,2})(?:[\.\-]20\d{2})?', clean_name)
+    # --- BẮT ĐẦU TÌM KIẾM ---
+    
+    # Mặc định
+    y_global = datetime.datetime.now().year
+    m_global = 12
+    
+    # Tìm Năm (4 chữ số đầu 202...)
+    y_match = re.search(r'202[0-9]', s)
+    if y_match: y_global = int(y_match.group(0))
+    
+    # Tìm Tháng (Sau chữ THANG/T)
+    m_match = re.search(r'(?:THANG|THÁNG|T)[^0-9]*(\d{1,2})', s)
+    if m_match: m_global = int(m_match.group(1))
+
+    # Ưu tiên 1: Tìm ngày đầy đủ (dd.mm.yyyy)
+    full_date_match = re.search(r'(\d{1,2})[\.\-](\d{1,2})[\.\-](20\d{2})', s)
     if full_date_match:
         try:
-            d = int(full_date_match.group(1)); m = int(full_date_match.group(2))
-            y = int(full_date_match.group(3)) if full_date_match.lastindex >= 3 else y_global
-            if m == 12 and m_global == 1: y -= 1 
-            elif m == 1 and m_global == 12: y += 1
+            d, m, y = map(int, full_date_match.groups())
             return m, y, datetime.date(y, m, d)
         except: pass
-
-    # 4. Ưu tiên 2 (FIX CHO FILE CỦA BẠN): Tìm số ngày lẻ loi ở cuối tên file (Ví dụ "... - 2")
-    end_day_match = re.search(r'[\- ](\d{1,2})$', clean_name)
+        
+    # Ưu tiên 2 (QUAN TRỌNG): Tìm số ngày lẻ loi ở CUỐI cùng của chuỗi
+    # Ví dụ: "TH...2026-26" -> Lấy 26
+    end_day_match = re.search(r'[\- ](\d{1,2})$', s)
     if end_day_match:
         try:
             d = int(end_day_match.group(1))
+            # Kiểm tra ngày hợp lệ (1-31)
             if 1 <= d <= 31:
                 return m_global, y_global, datetime.date(y_global, m_global, d)
         except: pass
 
+    # Không tìm thấy ngày -> Trả về None (File tổng hợp, file rác...)
     return m_global, y_global, None
 
 def find_header_row(df_preview):
@@ -674,24 +690,25 @@ def main():
             with c_opt1:
                 lookback = st.number_input("Xét (ngày):", value=20, min_value=5, step=5, label_visibility="collapsed")
             with c_opt2:
-                btn_scan_weight = st.button("QUÉT 🚀", help="Click để tự động điền trọng số tối ưu")
+                btn_scan_weight = st.button("QUÉT 🚀", help="Click để tự động điền trọng số tối ưu từ dữ liệu lịch sử")
             
             if btn_scan_weight:
                 if uploaded_files and data_cache:
-                     with st.spinner("Đang phân tích..."):
+                     with st.spinner("Đang phân tích xác suất..."):
                         suggested = analyze_best_weights(data_cache, kq_db, lookback)
                         if suggested:
+                            # Cập nhật Session State -> UI sẽ tự nhảy số
                             for k, v in suggested.items():
                                 idx = int(k.replace('M', ''))
                                 st.session_state[f'std_{idx}'] = v
                                 st.session_state[f'mod_{idx}'] = v 
-                            st.success("Đã tối ưu!")
+                            st.success(f"Đã tìm thấy bộ điểm tối ưu (Xét {lookback} ngày)!")
                             time.sleep(0.5)
                             st.rerun()
                         else:
-                            st.warning("Chưa đủ dữ liệu.")
+                            st.warning("Chưa đủ dữ liệu kết quả để phân tích.")
                 else:
-                    st.error("Chưa tải file data!")
+                    st.error("Vui lòng tải file dữ liệu trước!")
             st.divider()
             # --------------------------------------
 
@@ -766,8 +783,8 @@ def main():
                 with c_ex_u1:
                     expert_file = st.file_uploader("Tải File Text Cao Thủ (Nếu có):", type=['txt', 'csv'], key="expert_u")
                 with c_ex_u2:
-                    EXPERT_MIN_VOTE = st.number_input("Min Vote (Lọc cứng):", 1, 10, 2)
-                    EXPERT_TARGET_SIZE = st.number_input("Giữ lại (Lọc mềm):", 10, 80, 60)
+                    EXPERT_MIN_VOTE = st.number_input("Min Vote (Lọc cứng):", 1, 10, 2, help="Số lần xuất hiện tối thiểu để được xét duyệt")
+                    EXPERT_TARGET_SIZE = st.number_input("Giữ lại (Lọc mềm):", 10, 80, 60, help="Số lượng tối đa giữ lại dựa trên điểm trọng số")
                 st.markdown("---")
 
                 if st.button("🚀 CHẠY PHÂN TÍCH & SOI HYBRID", type="primary", use_container_width=True):
