@@ -553,47 +553,6 @@ def filter_expert_by_score(expert_list, base_std, base_mod, df_today, target_siz
         
     final_candidates.sort(key=lambda x: (-x['v'], x['r']))
     return sorted([x['n'] for x in final_candidates[:target_size]])
-
-# ==============================================================================
-# 3. GIAO DIỆN CHÍNH (MAIN APP) - PHẦN 2
-# ==============================================================================
-
-def main():
-    uploaded_files = st.file_uploader("📂 Tải file CSV/Excel", type=['xlsx', 'csv'], accept_multiple_files=True)
-
-    # LOAD CONFIG
-    saved_cfg = load_config()
-    if 'std_0' not in st.session_state:
-        if saved_cfg:
-            source = saved_cfg
-            st.session_state['preset_choice'] = "Cấu hình đã lưu (Saved)"
-        else:
-            source = SCORES_PRESETS["Balanced (Khuyên dùng 2026)"]
-            source_flat = {}
-            for i in range(11):
-                source_flat[f'std_{i}'] = source['STD'][i]
-                source_flat[f'mod_{i}'] = source['MOD'][i]
-            source_flat['L12'] = source['LIMITS']['l12']
-            source_flat['L34'] = source['LIMITS']['l34']
-            source_flat['L56'] = source['LIMITS']['l56']
-            source_flat['LMOD'] = source['LIMITS']['mod']
-            source_flat['MAX_TRIM'] = 75 
-            source_flat['ROLLING_WINDOW'] = source.get('ROLLING', 10)
-            source_flat['MIN_VOTES'] = 1
-            source_flat['USE_INVERSE'] = False
-            source_flat['USE_ADAPTIVE'] = False
-            source_flat['STRATEGY_MODE'] = "🛡️ V24 Cổ Điển"
-            source_flat['G3_INPUT'] = 75
-            source_flat['G3_TARGET'] = 70
-            source = source_flat
-        for k, v in source.items():
-            if k in ['STD', 'MOD', 'LIMITS']: continue 
-            st.session_state[k] = v
-
-    data_cache = {}; kq_db = {}; f_status = []; err_logs = []
-    if uploaded_files:
-        data_cache, kq_db, f_status, err_logs = load_data_v24(uploaded_files)
-
     with st.sidebar:
         st.header("⚙️ Cài đặt")
         
@@ -643,41 +602,43 @@ def main():
                 G3_TARGET = st.slider("Target (Giữ lại):", 50, 80, key="G3_TARGET")
             L_TOP_12=0; L_TOP_34=0; L_TOP_56=0; LIMIT_MODIFIED=0; MAX_TRIM_NUMS=75
 
-        # ... Tiếp tục bên trong st.sidebar ...
-        
         with st.expander("🎚️ 1. Điểm & Auto Limit", expanded=False):
-            # --- UI MỚI: AUTO-OPTIMIZER (QUÉT ĐIỂM) ---
+            # ==========================================================
+            # [TÍNH NĂNG MỚI] AUTO-OPTIMIZER (QUÉT ĐIỂM)
+            # ==========================================================
             st.caption("🤖 **AI Tự động tối ưu điểm (Auto-Optimize)**")
+            st.caption("Quét dữ liệu quá khứ để tìm trọng số M0-M10 chuẩn nhất.")
+            
             c_opt1, c_opt2 = st.columns([1.5, 1])
             with c_opt1:
                 lookback = st.number_input("Xét (ngày):", value=20, min_value=5, step=5, label_visibility="collapsed")
             with c_opt2:
-                btn_scan_weight = st.button("QUÉT 🚀", help="Click để tự động điền trọng số tối ưu từ dữ liệu lịch sử")
+                btn_scan_weight = st.button("QUÉT 🚀", help="Click để tự động điền trọng số tối ưu")
             
-            # XỬ LÝ SỰ KIỆN BẤM NÚT QUÉT
             if btn_scan_weight:
                 if uploaded_files and data_cache:
-                     with st.spinner("Đang phân tích xác suất..."):
+                     with st.spinner("Đang phân tích xác suất lịch sử..."):
                         suggested = analyze_best_weights(data_cache, kq_db, lookback)
                         if suggested:
+                            # Cập nhật Session State -> UI sẽ tự nhảy số
                             for k, v in suggested.items():
                                 idx = int(k.replace('M', ''))
                                 st.session_state[f'std_{idx}'] = v
-                                st.session_state[f'mod_{idx}'] = v 
-                            st.success("Đã tối ưu!")
+                                st.session_state[f'mod_{idx}'] = v # Set cả Mod bằng Std cho đồng bộ
+                            st.success("Đã tối ưu xong!")
                             time.sleep(0.5)
                             st.rerun()
                         else:
-                            st.warning("Chưa đủ dữ liệu KQ.")
+                            st.warning("Chưa đủ dữ liệu KQ để phân tích.")
                 else:
-                    st.error("Chưa có file data!")
+                    st.error("Vui lòng tải file dữ liệu trước!")
             
             st.divider()
-            
-            # --- CÁC Ô NHẬP ĐIỂM (GIỮ NGUYÊN) ---
+            # ==========================================================
+
             c_s1, c_s2 = st.columns(2)
             with c_s1:
-                st.write("**GỐC (STD)**")
+                st.write("**GỐC**")
                 for i in range(11): st.number_input(f"M{i}", key=f"std_{i}", min_value=0, max_value=100, step=5)
             with c_s2:
                 st.write("**MOD**")
@@ -731,24 +692,25 @@ def main():
             last_d = max(data_cache.keys())
             tab1, tab2, tab3 = st.tabs(["📊 DỰ ĐOÁN (ANALYSIS)", "🔙 BACKTEST", "🎯 MATRIX"])
             
-            # --- TAB 1: PREDICTION ---
+            # --- TAB 1: PREDICTION (NÂNG CẤP HYBRID & EXPERT) ---
             with tab1:
                 st.subheader(f"Dự đoán: {STRATEGY_MODE}")
                 if USE_ADAPTIVE: st.info("🧠 M Động: BẬT")
                 
-                # --- UI MỚI: UPLOAD FILE CAO THỦ ---
+                # --- UI UPLOAD FILE CAO THỦ ---
                 st.markdown("---")
                 c_d1, c_d2 = st.columns([1, 1])
-                with c_d1: target = st.date_input("Ngày dự đoán:", value=last_d)
+                with c_d1: target = st.date_input("Ngày:", value=last_d)
                 
+                st.caption("👤 **BỘ LỌC CAO THỦ (MỚI)**")
                 c_ex_u1, c_ex_u2 = st.columns([2, 1])
                 with c_ex_u1:
-                    expert_file = st.file_uploader("👤 File Text Cao Thủ (Nếu có):", type=['txt', 'csv'], key="expert_u")
+                    expert_file = st.file_uploader("Tải File Text Cao Thủ (Nếu có):", type=['txt', 'csv'], key="expert_u")
                 with c_ex_u2:
-                    EXPERT_MIN_VOTE = st.number_input("Expert Min Vote:", 1, 10, 2)
-                    EXPERT_TARGET_SIZE = st.number_input("Expert Target Size:", 10, 80, 60)
+                    EXPERT_MIN_VOTE = st.number_input("Min Vote (Lọc cứng):", 1, 10, 2, help="Số lần xuất hiện tối thiểu để được xét duyệt")
+                    EXPERT_TARGET_SIZE = st.number_input("Giữ lại (Lọc mềm):", 10, 80, 60, help="Số lượng tối đa giữ lại dựa trên điểm trọng số")
                 st.markdown("---")
-                # -----------------------------------
+                # ------------------------------
 
                 if st.button("🚀 CHẠY PHÂN TÍCH & SOI HYBRID", type="primary", use_container_width=True):
                     with st.spinner("Đang tính toán..."):
@@ -764,7 +726,7 @@ def main():
                         if STRATEGY_MODE == "🛡️ V24 Cổ Điển":
                             user_limits = {'l12': L_TOP_12, 'l34': L_TOP_34, 'l56': L_TOP_56, 'mod': LIMIT_MODIFIED}
                             res_curr, err_curr = calculate_v24_final(target, ROLLING_WINDOW, data_cache, kq_db, user_limits, MIN_VOTES, curr_std, curr_mod, USE_INVERSE, None, max_trim=MAX_TRIM_NUMS)
-                        else: 
+                        else: # Gốc 3
                             g3_res = calculate_goc_3_logic(target, ROLLING_WINDOW, data_cache, kq_db, st.session_state['G3_INPUT'], st.session_state['G3_TARGET'], curr_std, USE_INVERSE, MIN_VOTES)
                             if g3_res:
                                 res_curr = {'dan_goc': g3_res['dan_final'], 'dan_mod': [], 'dan_final': g3_res['dan_final'], 'source_col': g3_res['source_col']}
@@ -785,27 +747,31 @@ def main():
                             screen_goc = res_curr['dan_goc'] 
                             hybrid_goc = sorted(list(set(hc_goc).intersection(set(screen_goc))))
 
-                        # --- 4. XỬ LÝ CAO THỦ (LOGIC MỚI) ---
+                        # ==================================================
+                        # 4. XỬ LÝ CAO THỦ (LOGIC MỚI: FILTER BY SCORE)
+                        # ==================================================
                         final_expert_nums = []
                         if expert_file:
-                            # a. Đọc file + Lọc Vote
+                            # a. Đọc file + Lọc Min Vote (Lọc Cứng)
                             raw_experts = process_expert_text_v2(expert_file, EXPERT_MIN_VOTE)
-                            # b. Lấy cấu hình điểm Màn hình (đã được tối ưu nếu bấm Quét)
+                            
+                            # b. Lấy cấu hình điểm Màn hình (curr_std - đã tối ưu nếu bấm Quét)
                             curr_std_cfg = {f'M{i}': st.session_state[f'std_{i}'] for i in range(11)}
                             curr_mod_cfg = {f'M{i}': st.session_state[f'mod_{i}'] for i in range(11)}
+                            
                             # c. Lấy DF hôm nay để chấm điểm
                             if target in data_cache:
                                 df_today = data_cache[target]['df']
-                                # d. Lọc theo điểm
+                                # d. Lọc mềm theo điểm trọng số
                                 final_expert_nums = filter_expert_by_score(
                                     raw_experts, curr_std_cfg, curr_mod_cfg, df_today, EXPERT_TARGET_SIZE
                                 )
-                        # ------------------------------------
+                        # ==================================================
 
                         st.session_state['run_result'] = {
                             'res_curr': res_curr, 'target': target, 'err': err_curr,
                             'hc_goc': hc_goc, 'screen_goc': screen_goc, 'hybrid_goc': hybrid_goc,
-                            'dan_expert': final_expert_nums # Lưu kết quả expert
+                            'dan_expert': final_expert_nums # Lưu kết quả cao thủ
                         }
 
                 if 'run_result' in st.session_state and st.session_state['run_result']['target'] == target:
@@ -835,13 +801,17 @@ def main():
                         if 'dan_expert' in rr and rr['dan_expert']:
                             st.divider()
                             st.write(f"#### 👤 Dàn Cao Thủ (Lọc bởi Điểm Màn Hình)")
-                            st.caption(f"Input File -> Min Vote ({EXPERT_MIN_VOTE}) -> Top Score ({EXPERT_TARGET_SIZE} số)")
+                            st.caption(f"Quy trình: File Text -> Lọc Min Vote ({EXPERT_MIN_VOTE}) -> Chấm điểm bằng Trọng số Màn hình -> Giữ lại {EXPERT_TARGET_SIZE} số điểm cao nhất.")
                             
-                            st.text_area("KẾT QUẢ EXPERT:", ",".join(rr['dan_expert']), height=80)
-                            
-                            if 'hybrid_goc' in rr:
-                                super_hyb = sorted(list(set(rr['dan_expert']).intersection(set(rr['hybrid_goc']))))
-                                st.info(f"💎 **SIÊU KẾT (Trùng máu Máy & Người):** {len(super_hyb)} số: {', '.join(super_hyb)}")
+                            c_ex1, c_ex2 = st.columns([3, 1])
+                            with c_ex1:
+                                st.text_area("KẾT QUẢ EXPERT:", ",".join(rr['dan_expert']), height=80)
+                            with c_ex2:
+                                # Tính Siêu Kết (Giao thoa Expert và Hybrid Máy)
+                                if 'hybrid_goc' in rr:
+                                    super_hyb = sorted(list(set(rr['dan_expert']).intersection(set(rr['hybrid_goc']))))
+                                    st.metric("Số lượng", len(rr['dan_expert']))
+                                    st.info(f"💎 **SIÊU KẾT:** {len(super_hyb)} số")
                         # --------------------------------
 
                         if target in kq_db:
@@ -858,8 +828,8 @@ def main():
                             
                             # Check win Expert
                             if 'dan_expert' in rr and rr['dan_expert']:
-                                if real in rr['dan_expert']: st.success("Cao thủ: WIN")
-                                else: st.error("Cao thủ: MISS")
+                                if real in rr['dan_expert']: st.success(f"Cao thủ ({len(rr['dan_expert'])}): WIN")
+                                else: st.error(f"Cao thủ ({len(rr['dan_expert'])}): MISS")
 
                             pa2.render_pa2_preanalysis(
                                 res_curr=res_curr,
