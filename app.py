@@ -12,7 +12,7 @@ import numpy as np
 import pa2_preanalysis_text as pa2
 
 # ==============================================================================
-# 1. CẤU HÌNH HỆ THỐNG & PRESETS (GIỮ NGUYÊN)
+# 1. CẤU HÌNH HỆ THỐNG & PRESETS
 # ==============================================================================
 st.set_page_config(
     page_title="Quang Pro V62 - Dynamic Hybrid", 
@@ -22,7 +22,7 @@ st.set_page_config(
 )
 
 st.title("🛡️ Quang Handsome: V62 Dynamic Hybrid")
-st.caption("🚀 Tính năng mới: Auto-Optimize Trọng Số | Lọc Cao Thủ theo Điểm Màn Hình")
+st.caption("🚀 Tính năng mới: Auto-Optimize Trọng Số | Lọc Cao Thủ theo Điểm Màn Hình | Fix lỗi đọc file tên ngắn")
 
 CONFIG_FILE = 'config.json'
 
@@ -60,7 +60,7 @@ RE_SLASH_DATE = re.compile(r'(\d{1,2})[\.\-/](\d{1,2})')
 BAD_KEYWORDS = frozenset(['N', 'NGHI', 'SX', 'XIT', 'MISS', 'TRUOT', 'NGHỈ', 'LỖI'])
 
 # ==============================================================================
-# 2. CORE FUNCTIONS (GIỮ NGUYÊN CODE CŨ CỦA BẠN)
+# 2. CORE FUNCTIONS
 # ==============================================================================
 
 @lru_cache(maxsize=10000)
@@ -137,13 +137,20 @@ def parse_date_smart(col_str, f_m, f_y):
         except: return None
     return None
 
+# --- HÀM NÀY ĐÃ ĐƯỢC FIX ĐỂ ĐỌC FILE TÊN NGẮN ---
 def extract_meta_from_filename(filename):
     clean_name = filename.upper().replace(".CSV", "").replace(".XLSX", "")
     clean_name = re.sub(r'\s*-\s*', '-', clean_name) 
+    
+    # 1. Tìm Năm
     y_match = re.search(r'202[0-9]', clean_name)
     y_global = int(y_match.group(0)) if y_match else datetime.datetime.now().year
+    
+    # 2. Tìm Tháng
     m_match = re.search(r'(?:THANG|THÁNG|T)[^0-9]*(\d{1,2})', clean_name)
     m_global = int(m_match.group(1)) if m_match else 12
+    
+    # 3. Ưu tiên 1: Tìm ngày đầy đủ (1.1.2026)
     full_date_match = re.search(r'(\d{1,2})[\.\-](\d{1,2})(?:[\.\-]20\d{2})?', clean_name)
     if full_date_match:
         try:
@@ -153,6 +160,16 @@ def extract_meta_from_filename(filename):
             elif m == 1 and m_global == 12: y += 1
             return m, y, datetime.date(y, m, d)
         except: pass
+
+    # 4. Ưu tiên 2 (FIX CHO FILE CỦA BẠN): Tìm số ngày lẻ loi ở cuối tên file (Ví dụ "... - 2")
+    end_day_match = re.search(r'[\- ](\d{1,2})$', clean_name)
+    if end_day_match:
+        try:
+            d = int(end_day_match.group(1))
+            if 1 <= d <= 31:
+                return m_global, y_global, datetime.date(y_global, m_global, d)
+        except: pass
+
     return m_global, y_global, None
 
 def find_header_row(df_preview):
@@ -164,7 +181,6 @@ def find_header_row(df_preview):
 
 @st.cache_data(ttl=600, show_spinner=False)
 def load_data_v24(files):
-    # --- GIỮ NGUYÊN CODE CŨ CỦA BẠN 100% ---
     cache = {}; kq_db = {}; err_logs = []; file_status = []
     files = sorted(files, key=lambda x: x.name)
     for file in files:
@@ -489,7 +505,7 @@ def save_config(config_data):
     except: return False
 
 # ==============================================================================
-# 3. CÁC HÀM MỚI (CHỈ THÊM, KHÔNG SỬA CŨ)
+# 3. CÁC HÀM MỚI (PHỤC VỤ QUÉT ĐIỂM & LỌC CAO THỦ)
 # ==============================================================================
 
 def analyze_best_weights(data_cache, kq_db, lookback_days=30):
@@ -537,7 +553,11 @@ def process_expert_text_v2(uploaded_file, min_vote=1):
     except: return []
 
 def filter_expert_by_score(expert_list, base_std, base_mod, df_today, target_size=60):
+    """
+    Lọc expert: Ưu tiên Vote -> Sau đó ưu tiên Score.
+    """
     if not expert_list: return []
+    # Nếu ít hơn target, lấy hết
     if len(expert_list) <= target_size: return sorted([x[0] for x in expert_list])
     
     p_map = {}; s_map = {}
@@ -552,9 +572,10 @@ def filter_expert_by_score(expert_list, base_std, base_mod, df_today, target_siz
     
     final_candidates = []
     for num, vote in expert_list:
-        rank = rank_map.get(num, 999)
+        rank = rank_map.get(num, 999) # Rank càng nhỏ càng tốt
         final_candidates.append({'n': num, 'v': vote, 'r': rank})
         
+    # Sort: Ưu tiên Vote cao -> Sau đó ưu tiên Rank thấp (Điểm cao)
     final_candidates.sort(key=lambda x: (-x['v'], x['r']))
     return sorted([x['n'] for x in final_candidates[:target_size]])
 # ==============================================================================
