@@ -12,7 +12,7 @@ import numpy as np
 import pa2_preanalysis_text as pa2
 
 # ==============================================================================
-# 1. CẤU HÌNH HỆ THỐNG & PRESETS
+# 1. CẤU HÌNH HỆ THỐNG & PRESETS (GIỮ NGUYÊN)
 # ==============================================================================
 st.set_page_config(
     page_title="Quang Pro V62 - Dynamic Hybrid", 
@@ -60,7 +60,7 @@ RE_SLASH_DATE = re.compile(r'(\d{1,2})[\.\-/](\d{1,2})')
 BAD_KEYWORDS = frozenset(['N', 'NGHI', 'SX', 'XIT', 'MISS', 'TRUOT', 'NGHỈ', 'LỖI'])
 
 # ==============================================================================
-# 2. CORE FUNCTIONS
+# 2. CORE FUNCTIONS (GIỮ NGUYÊN CODE CŨ CỦA BẠN)
 # ==============================================================================
 
 @lru_cache(maxsize=10000)
@@ -164,6 +164,7 @@ def find_header_row(df_preview):
 
 @st.cache_data(ttl=600, show_spinner=False)
 def load_data_v24(files):
+    # --- GIỮ NGUYÊN CODE CŨ CỦA BẠN 100% ---
     cache = {}; kq_db = {}; err_logs = []; file_status = []
     files = sorted(files, key=lambda x: x.name)
     for file in files:
@@ -278,7 +279,7 @@ def fast_get_top_nums(df, p_map_dict, s_map_dict, top_n, min_v, inverse):
     else: stats = stats.sort_values(by=['P', 'V', 'Num_Int'], ascending=[False, False, True])
     return stats['Num'].head(int(top_n)).tolist()
 
-# --- V24 LOGIC ---
+# --- V24 LOGIC (GIỮ NGUYÊN) ---
 def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits_config, min_votes, score_std, score_mod, use_inverse, manual_groups=None, max_trim=None):
     if target_date not in _cache: return None
     curr_data = _cache[target_date]; df = curr_data['df']
@@ -390,7 +391,7 @@ def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits
         "dan_mod": final_modified, "dan_final": final_intersect, "source_col": col_hist_used
     }
 
-# --- GỐC 3 LOGIC (CÓ SMART CUT) ---
+# --- GỐC 3 LOGIC (GIỮ NGUYÊN) ---
 def smart_trim_by_score(number_list, df, p_map, s_map, target_size):
     if len(number_list) <= target_size: return sorted(number_list)
     temp_df = df.copy()
@@ -487,7 +488,10 @@ def save_config(config_data):
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f: json.dump(config_data, f, indent=4); return True
     except: return False
 
-# --- TÍNH NĂNG MỚI: TỐI ƯU TRỌNG SỐ & XỬ LÝ CAO THỦ ---
+# ==============================================================================
+# 3. CÁC HÀM MỚI (CHỈ THÊM, KHÔNG SỬA CŨ)
+# ==============================================================================
+
 def analyze_best_weights(data_cache, kq_db, lookback_days=30):
     stats = {i: 0 for i in range(11)}
     valid_dates = sorted([d for d in data_cache.keys() if d in kq_db], reverse=True)
@@ -554,14 +558,13 @@ def filter_expert_by_score(expert_list, base_std, base_mod, df_today, target_siz
     final_candidates.sort(key=lambda x: (-x['v'], x['r']))
     return sorted([x['n'] for x in final_candidates[:target_size]])
 # ==============================================================================
-# 3. GIAO DIỆN CHÍNH (MAIN APP) - PHẦN 2 (SỬA LỖI)
+# 3. GIAO DIỆN CHÍNH (MAIN APP) - PHẦN 2
 # ==============================================================================
 
 def main():
-    # --- PHẦN BỊ THIẾU ĐÃ ĐƯỢC THÊM LẠI ---
     uploaded_files = st.file_uploader("📂 Tải file CSV/Excel Data", type=['xlsx', 'csv'], accept_multiple_files=True)
 
-    # LOAD CONFIG
+    # --- LOAD CONFIG & SESSION STATE ---
     saved_cfg = load_config()
     if 'std_0' not in st.session_state:
         if saved_cfg:
@@ -593,7 +596,6 @@ def main():
     data_cache = {}; kq_db = {}; f_status = []; err_logs = []
     if uploaded_files:
         data_cache, kq_db, f_status, err_logs = load_data_v24(uploaded_files)
-    # ---------------------------------------
 
     with st.sidebar:
         st.header("⚙️ Cài đặt")
@@ -645,7 +647,7 @@ def main():
             L_TOP_12=0; L_TOP_34=0; L_TOP_56=0; LIMIT_MODIFIED=0; MAX_TRIM_NUMS=75
 
         with st.expander("🎚️ 1. Điểm & Auto Limit", expanded=False):
-            # --- AUTO-OPTIMIZER ---
+            # --- AUTO-OPTIMIZER (TÍNH NĂNG MỚI) ---
             st.caption("🤖 **AI Tự động tối ưu điểm**")
             c_opt1, c_opt2 = st.columns([1.5, 1])
             with c_opt1:
@@ -669,9 +671,8 @@ def main():
                             st.warning("Chưa đủ dữ liệu.")
                 else:
                     st.error("Chưa tải file data!")
-            
             st.divider()
-            # ----------------------
+            # --------------------------------------
 
             c_s1, c_s2 = st.columns(2)
             with c_s1:
@@ -738,14 +739,14 @@ def main():
                 c_d1, c_d2 = st.columns([1, 1])
                 with c_d1: target = st.date_input("Ngày:", value=last_d)
                 
-                # UPLOAD CAO THỦ
-                st.caption("👤 **BỘ LỌC CAO THỦ (MỚI)**")
+                # --- GIAO DIỆN CAO THỦ (MỚI) ---
+                st.caption("👤 **BỘ LỌC CAO THỦ**")
                 c_ex_u1, c_ex_u2 = st.columns([2, 1])
                 with c_ex_u1:
                     expert_file = st.file_uploader("Tải File Text Cao Thủ (Nếu có):", type=['txt', 'csv'], key="expert_u")
                 with c_ex_u2:
-                    EXPERT_MIN_VOTE = st.number_input("Min Vote:", 1, 10, 2)
-                    EXPERT_TARGET_SIZE = st.number_input("Giữ lại:", 10, 80, 60)
+                    EXPERT_MIN_VOTE = st.number_input("Min Vote (Lọc cứng):", 1, 10, 2)
+                    EXPERT_TARGET_SIZE = st.number_input("Giữ lại (Lọc mềm):", 10, 80, 60)
                 st.markdown("---")
 
                 if st.button("🚀 CHẠY PHÂN TÍCH & SOI HYBRID", type="primary", use_container_width=True):
@@ -758,7 +759,7 @@ def main():
                             curr_mod = get_adaptive_weights(target, base_mod, data_cache, kq_db, window=3, factor=1.5)
                         else: curr_std, curr_mod = base_std, base_mod
 
-                        # 1. Main Logic
+                        # 1. Main System Logic
                         if STRATEGY_MODE == "🛡️ V24 Cổ Điển":
                             user_limits = {'l12': L_TOP_12, 'l34': L_TOP_34, 'l56': L_TOP_56, 'mod': LIMIT_MODIFIED}
                             res_curr, err_curr = calculate_v24_final(target, ROLLING_WINDOW, data_cache, kq_db, user_limits, MIN_VOTES, curr_std, curr_mod, USE_INVERSE, None, max_trim=MAX_TRIM_NUMS)
@@ -783,14 +784,17 @@ def main():
                             screen_goc = res_curr['dan_goc'] 
                             hybrid_goc = sorted(list(set(hc_goc).intersection(set(screen_goc))))
 
-                        # 4. EXPERT LOGIC
+                        # 4. EXPERT LOGIC (Xử lý cao thủ)
                         final_expert_nums = []
                         if expert_file:
+                            # a. Đọc và lọc Vote
                             raw_experts = process_expert_text_v2(expert_file, EXPERT_MIN_VOTE)
+                            # b. Lấy cấu hình điểm hiện tại (đã được tối ưu nếu bấm Quét)
                             curr_std_cfg = {f'M{i}': st.session_state[f'std_{i}'] for i in range(11)}
                             curr_mod_cfg = {f'M{i}': st.session_state[f'mod_{i}'] for i in range(11)}
                             if target in data_cache:
                                 df_today = data_cache[target]['df']
+                                # c. Lọc theo điểm trọng số
                                 final_expert_nums = filter_expert_by_score(
                                     raw_experts, curr_std_cfg, curr_mod_cfg, df_today, EXPERT_TARGET_SIZE
                                 )
