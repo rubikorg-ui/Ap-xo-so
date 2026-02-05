@@ -10,7 +10,6 @@ from collections import Counter
 from functools import lru_cache
 import numpy as np
 import pa2_preanalysis_text as pa2
-
 # ==============================================================================
 # 1. CẤU HÌNH HỆ THỐNG & PRESETS
 # ==============================================================================
@@ -22,7 +21,7 @@ st.set_page_config(
 )
 
 st.title("🛡️ Quang Handsome: V62 Dynamic Hybrid")
-st.caption("🚀 Tính năng mới: Auto-Optimize Trọng Số | Lọc Cao Thủ theo Điểm Màn Hình | Fix lỗi đọc file tên ngắn")
+st.caption("🚀 Tính năng mới: Hybrid thay đổi theo tinh chỉnh màn hình | Backtest Đơn | M Động")
 
 CONFIG_FILE = 'config.json'
 
@@ -137,55 +136,22 @@ def parse_date_smart(col_str, f_m, f_y):
         except: return None
     return None
 
-# --- HÀM NÀY ĐÃ ĐƯỢC FIX MẠNH MẼ (V3) ---
 def extract_meta_from_filename(filename):
-    """
-    Phiên bản V3 (Final): Xử lý triệt để file tên ngắn, bất chấp khoảng trắng thừa.
-    """
-    # 1. Chuẩn hóa tên file: Chuyển về chữ hoa, xóa khoảng trắng thừa 2 đầu
-    s = filename.upper().strip()
-    
-    # 2. Xóa đuôi file bằng Regex (xử lý cả trường hợp ".csv " có dấu cách)
-    s = re.sub(r'\.CSV\s*$', '', s)
-    s = re.sub(r'\.XLSX\s*$', '', s)
-    
-    # 3. Chuẩn hóa dấu gạch ngang (Biến " - " thành "-")
-    s = re.sub(r'\s*-\s*', '-', s)
-    
-    # --- BẮT ĐẦU TÌM KIẾM ---
-    
-    # Mặc định
-    y_global = datetime.datetime.now().year
-    m_global = 12
-    
-    # Tìm Năm (4 chữ số đầu 202...)
-    y_match = re.search(r'202[0-9]', s)
-    if y_match: y_global = int(y_match.group(0))
-    
-    # Tìm Tháng (Sau chữ THANG/T)
-    m_match = re.search(r'(?:THANG|THÁNG|T)[^0-9]*(\d{1,2})', s)
-    if m_match: m_global = int(m_match.group(1))
-
-    # Ưu tiên 1: Tìm ngày đầy đủ (dd.mm.yyyy)
-    full_date_match = re.search(r'(\d{1,2})[\.\-](\d{1,2})[\.\-](20\d{2})', s)
+    clean_name = filename.upper().replace(".CSV", "").replace(".XLSX", "")
+    clean_name = re.sub(r'\s*-\s*', '-', clean_name) 
+    y_match = re.search(r'202[0-9]', clean_name)
+    y_global = int(y_match.group(0)) if y_match else datetime.datetime.now().year
+    m_match = re.search(r'(?:THANG|THÁNG|T)[^0-9]*(\d{1,2})', clean_name)
+    m_global = int(m_match.group(1)) if m_match else 12
+    full_date_match = re.search(r'(\d{1,2})[\.\-](\d{1,2})(?:[\.\-]20\d{2})?', clean_name)
     if full_date_match:
         try:
-            d, m, y = map(int, full_date_match.groups())
+            d = int(full_date_match.group(1)); m = int(full_date_match.group(2))
+            y = int(full_date_match.group(3)) if full_date_match.lastindex >= 3 else y_global
+            if m == 12 and m_global == 1: y -= 1 
+            elif m == 1 and m_global == 12: y += 1
             return m, y, datetime.date(y, m, d)
         except: pass
-        
-    # Ưu tiên 2 (QUAN TRỌNG): Tìm số ngày lẻ loi ở CUỐI cùng của chuỗi
-    # Ví dụ: "TH...2026-26" -> Lấy 26
-    end_day_match = re.search(r'[\- ](\d{1,2})$', s)
-    if end_day_match:
-        try:
-            d = int(end_day_match.group(1))
-            # Kiểm tra ngày hợp lệ (1-31)
-            if 1 <= d <= 31:
-                return m_global, y_global, datetime.date(y_global, m_global, d)
-        except: pass
-
-    # Không tìm thấy ngày -> Trả về None (File tổng hợp, file rác...)
     return m_global, y_global, None
 
 def find_header_row(df_preview):
@@ -311,7 +277,7 @@ def fast_get_top_nums(df, p_map_dict, s_map_dict, top_n, min_v, inverse):
     else: stats = stats.sort_values(by=['P', 'V', 'Num_Int'], ascending=[False, False, True])
     return stats['Num'].head(int(top_n)).tolist()
 
-# --- V24 LOGIC (GIỮ NGUYÊN) ---
+# --- V24 LOGIC ---
 def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits_config, min_votes, score_std, score_mod, use_inverse, manual_groups=None, max_trim=None):
     if target_date not in _cache: return None
     curr_data = _cache[target_date]; df = curr_data['df']
@@ -423,7 +389,7 @@ def calculate_v24_logic_only(target_date, rolling_window, _cache, _kq_db, limits
         "dan_mod": final_modified, "dan_final": final_intersect, "source_col": col_hist_used
     }
 
-# --- GỐC 3 LOGIC (GIỮ NGUYÊN) ---
+# --- GỐC 3 LOGIC (CÓ SMART CUT) ---
 def smart_trim_by_score(number_list, df, p_map, s_map, target_size):
     if len(number_list) <= target_size: return sorted(number_list)
     temp_df = df.copy()
@@ -519,95 +485,21 @@ def save_config(config_data):
     try:
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f: json.dump(config_data, f, indent=4); return True
     except: return False
-
-# ==============================================================================
-# 3. CÁC HÀM MỚI (PHỤC VỤ QUÉT ĐIỂM & LỌC CAO THỦ)
-# ==============================================================================
-
-def analyze_best_weights(data_cache, kq_db, lookback_days=30):
-    stats = {i: 0 for i in range(11)}
-    valid_dates = sorted([d for d in data_cache.keys() if d in kq_db], reverse=True)
-    if not valid_dates: return None
-    check_dates = valid_dates[:lookback_days]
-    if not check_dates: return None
-
-    for d in check_dates:
-        kq = str(kq_db[d]).zfill(2)
-        df = data_cache[d]['df']
-        for col in df.columns:
-            clean_c = col.replace(" ", "").upper()
-            m_idx = -1
-            if 'M10' in clean_c: m_idx = 10
-            elif re.match(r'^M\d+$', clean_c): 
-                try: m_idx = int(clean_c.replace('M', ''))
-                except: pass
-            if 0 <= m_idx <= 10:
-                try:
-                    col_content = " ".join(df[col].astype(str).tolist()).upper()
-                    if kq in get_nums(col_content): stats[m_idx] += 1
-                except: pass
-
-    max_hit = max(stats.values())
-    if max_hit == 0: return None
-    
-    suggested_weights = {}
-    for i in range(11):
-        raw = (stats[i] / max_hit) * 100
-        val = int(round(raw / 5) * 5)
-        suggested_weights[f'M{i}'] = val
-    return suggested_weights
-
-def process_expert_text_v2(uploaded_file, min_vote=1):
-    try:
-        content = uploaded_file.getvalue().decode("utf-8")
-        all_nums = re.findall(r'\d+', content)
-        clean_nums = [n.zfill(2) for n in all_nums if len(n) <= 2]
-        counts = Counter(clean_nums)
-        filtered = [(n, c) for n, c in counts.items() if c >= min_vote]
-        filtered.sort(key=lambda x: x[1], reverse=True)
-        return filtered
-    except: return []
-
-def filter_expert_by_score(expert_list, base_std, base_mod, df_today, target_size=60):
-    """
-    Lọc expert: Ưu tiên Vote -> Sau đó ưu tiên Score.
-    """
-    if not expert_list: return []
-    # Nếu ít hơn target, lấy hết
-    if len(expert_list) <= target_size: return sorted([x[0] for x in expert_list])
-    
-    p_map = {}; s_map = {}
-    for col in df_today.columns:
-        sc_p = get_col_score(col, tuple(base_std.items()))
-        if sc_p > 0: p_map[col] = sc_p
-        sc_s = get_col_score(col, tuple(base_mod.items()))
-        if sc_s > 0: s_map[col] = sc_s
-        
-    all_rated = fast_get_top_nums(df_today, p_map, s_map, 100, 1, False)
-    rank_map = {n: i for i, n in enumerate(all_rated)}
-    
-    final_candidates = []
-    for num, vote in expert_list:
-        rank = rank_map.get(num, 999) # Rank càng nhỏ càng tốt
-        final_candidates.append({'n': num, 'v': vote, 'r': rank})
-        
-    # Sort: Ưu tiên Vote cao -> Sau đó ưu tiên Rank thấp (Điểm cao)
-    final_candidates.sort(key=lambda x: (-x['v'], x['r']))
-    return sorted([x['n'] for x in final_candidates[:target_size]])
 # ==============================================================================
 # 3. GIAO DIỆN CHÍNH (MAIN APP) - PHẦN 2
 # ==============================================================================
 
 def main():
-    uploaded_files = st.file_uploader("📂 Tải file CSV/Excel Data", type=['xlsx', 'csv'], accept_multiple_files=True)
+    uploaded_files = st.file_uploader("📂 Tải file CSV/Excel", type=['xlsx', 'csv'], accept_multiple_files=True)
 
-    # --- LOAD CONFIG & SESSION STATE ---
+    # LOAD CONFIG
     saved_cfg = load_config()
     if 'std_0' not in st.session_state:
         if saved_cfg:
             source = saved_cfg
             st.session_state['preset_choice'] = "Cấu hình đã lưu (Saved)"
         else:
+            # Mặc định dùng Balanced
             source = SCORES_PRESETS["Balanced (Khuyên dùng 2026)"]
             source_flat = {}
             for i in range(11):
@@ -629,10 +521,6 @@ def main():
         for k, v in source.items():
             if k in ['STD', 'MOD', 'LIMITS']: continue 
             st.session_state[k] = v
-
-    data_cache = {}; kq_db = {}; f_status = []; err_logs = []
-    if uploaded_files:
-        data_cache, kq_db, f_status, err_logs = load_data_v24(uploaded_files)
 
     with st.sidebar:
         st.header("⚙️ Cài đặt")
@@ -670,6 +558,7 @@ def main():
 
         ROLLING_WINDOW = st.number_input("Chu kỳ xét (Ngày)", min_value=1, key="ROLLING_WINDOW")
         
+        # --- CẤU HÌNH ĐỘNG THEO CHẾ ĐỘ ---
         if STRATEGY_MODE == "🛡️ V24 Cổ Điển":
             with st.expander("✂️ Cắt Top V24", expanded=True):
                 L_TOP_12 = st.number_input("Top 1 & 2 lấy:", step=1, key="L12")
@@ -684,41 +573,13 @@ def main():
             L_TOP_12=0; L_TOP_34=0; L_TOP_56=0; LIMIT_MODIFIED=0; MAX_TRIM_NUMS=75
 
         with st.expander("🎚️ 1. Điểm & Auto Limit", expanded=False):
-            # --- AUTO-OPTIMIZER (TÍNH NĂNG MỚI) ---
-            st.caption("🤖 **AI Tự động tối ưu điểm**")
-            c_opt1, c_opt2 = st.columns([1.5, 1])
-            with c_opt1:
-                lookback = st.number_input("Xét (ngày):", value=20, min_value=5, step=5, label_visibility="collapsed")
-            with c_opt2:
-                btn_scan_weight = st.button("QUÉT 🚀", help="Click để tự động điền trọng số tối ưu từ dữ liệu lịch sử")
-            
-            if btn_scan_weight:
-                if uploaded_files and data_cache:
-                     with st.spinner("Đang phân tích xác suất..."):
-                        suggested = analyze_best_weights(data_cache, kq_db, lookback)
-                        if suggested:
-                            # Cập nhật Session State -> UI sẽ tự nhảy số
-                            for k, v in suggested.items():
-                                idx = int(k.replace('M', ''))
-                                st.session_state[f'std_{idx}'] = v
-                                st.session_state[f'mod_{idx}'] = v 
-                            st.success(f"Đã tìm thấy bộ điểm tối ưu (Xét {lookback} ngày)!")
-                            time.sleep(0.5)
-                            st.rerun()
-                        else:
-                            st.warning("Chưa đủ dữ liệu kết quả để phân tích.")
-                else:
-                    st.error("Vui lòng tải file dữ liệu trước!")
-            st.divider()
-            # --------------------------------------
-
             c_s1, c_s2 = st.columns(2)
             with c_s1:
                 st.write("**GỐC**")
-                for i in range(11): st.number_input(f"M{i}", key=f"std_{i}", min_value=0, max_value=100, step=5)
+                for i in range(11): st.number_input(f"M{i}", key=f"std_{i}")
             with c_s2:
                 st.write("**MOD**")
-                for i in range(11): st.number_input(f"M{i}", key=f"mod_{i}", min_value=0, max_value=100, step=5)
+                for i in range(11): st.number_input(f"M{i}", key=f"mod_{i}")
 
         st.markdown("---")
         with st.expander("👁️ Hiển thị (Dự Đoán)", expanded=True):
@@ -757,6 +618,7 @@ def main():
         if st.button("🗑️ XÓA CACHE", type="primary"): st.cache_data.clear(); st.rerun()
 
     if uploaded_files:
+        data_cache, kq_db, f_status, err_logs = load_data_v24(uploaded_files)
         with st.expander("🕵️ Trạng thái File & Debug", expanded=False):
             for s in f_status: st.success(s)
             for e in err_logs: st.error(e)
@@ -766,26 +628,14 @@ def main():
         
         if data_cache:
             last_d = max(data_cache.keys())
-            tab1, tab2, tab3 = st.tabs(["📊 DỰ ĐOÁN", "🔙 BACKTEST", "🎯 MATRIX"])
+            tab1, tab2, tab3 = st.tabs(["📊 DỰ ĐOÁN (ANALYSIS)", "🔙 BACKTEST", "🎯 MATRIX"])
             
-            # --- TAB 1: PREDICTION ---
+            # --- TAB 1: PREDICTION (NÂNG CẤP HYBRID ĐỘNG) ---
             with tab1:
                 st.subheader(f"Dự đoán: {STRATEGY_MODE}")
                 if USE_ADAPTIVE: st.info("🧠 M Động: BẬT")
-                
-                st.markdown("---")
                 c_d1, c_d2 = st.columns([1, 1])
                 with c_d1: target = st.date_input("Ngày:", value=last_d)
-                
-                # --- GIAO DIỆN CAO THỦ (MỚI) ---
-                st.caption("👤 **BỘ LỌC CAO THỦ**")
-                c_ex_u1, c_ex_u2 = st.columns([2, 1])
-                with c_ex_u1:
-                    expert_file = st.file_uploader("Tải File Text Cao Thủ (Nếu có):", type=['txt', 'csv'], key="expert_u")
-                with c_ex_u2:
-                    EXPERT_MIN_VOTE = st.number_input("Min Vote (Lọc cứng):", 1, 10, 2, help="Số lần xuất hiện tối thiểu để được xét duyệt")
-                    EXPERT_TARGET_SIZE = st.number_input("Giữ lại (Lọc mềm):", 10, 80, 60, help="Số lượng tối đa giữ lại dựa trên điểm trọng số")
-                st.markdown("---")
 
                 if st.button("🚀 CHẠY PHÂN TÍCH & SOI HYBRID", type="primary", use_container_width=True):
                     with st.spinner("Đang tính toán..."):
@@ -797,50 +647,37 @@ def main():
                             curr_mod = get_adaptive_weights(target, base_mod, data_cache, kq_db, window=3, factor=1.5)
                         else: curr_std, curr_mod = base_std, base_mod
 
-                        # 1. Main System Logic
+                        # 1. Chạy cấu hình chính (Màn hình) -> Đây là "res_curr"
                         if STRATEGY_MODE == "🛡️ V24 Cổ Điển":
                             user_limits = {'l12': L_TOP_12, 'l34': L_TOP_34, 'l56': L_TOP_56, 'mod': LIMIT_MODIFIED}
                             res_curr, err_curr = calculate_v24_final(target, ROLLING_WINDOW, data_cache, kq_db, user_limits, MIN_VOTES, curr_std, curr_mod, USE_INVERSE, None, max_trim=MAX_TRIM_NUMS)
-                        else: 
+                        else: # Gốc 3
                             g3_res = calculate_goc_3_logic(target, ROLLING_WINDOW, data_cache, kq_db, st.session_state['G3_INPUT'], st.session_state['G3_TARGET'], curr_std, USE_INVERSE, MIN_VOTES)
                             if g3_res:
                                 res_curr = {'dan_goc': g3_res['dan_final'], 'dan_mod': [], 'dan_final': g3_res['dan_final'], 'source_col': g3_res['source_col']}
                                 err_curr = None
                             else: res_curr=None; err_curr="Lỗi"
 
-                        # 2. Hard Core
+                        # 2. Chạy Hard Core (Gốc) Cố định để làm trụ
                         s_hc, m_hc, l_hc, r_hc = get_preset_params("Hard Core (Gốc)")
                         if USE_ADAPTIVE: s_hc = get_adaptive_weights(target, s_hc, data_cache, kq_db, 3, 1.5)
                         res_hc = calculate_v24_logic_only(target, r_hc, data_cache, kq_db, l_hc, MIN_VOTES, s_hc, m_hc, USE_INVERSE, None, max_trim=MAX_TRIM_NUMS)
                         
-                        # 3. Hybrid
+                        # 3. TÍNH HYBRID ĐỘNG (Dynamic Intersection)
+                        # Hybrid = Giao của [Hard Core] + [Dàn Hiện Tại trên Màn Hình]
+                        # Điều này đảm bảo khi bạn chỉnh màn hình, Hybrid sẽ thay đổi theo.
                         hybrid_goc = []
                         hc_goc = []
                         screen_goc = []
+                        
                         if res_hc and res_curr:
                             hc_goc = res_hc['dan_goc']
-                            screen_goc = res_curr['dan_goc'] 
+                            screen_goc = res_curr['dan_goc'] # Dàn bạn đang chỉnh (CH1 hoặc bất cứ gì)
                             hybrid_goc = sorted(list(set(hc_goc).intersection(set(screen_goc))))
-
-                        # 4. EXPERT LOGIC (Xử lý cao thủ)
-                        final_expert_nums = []
-                        if expert_file:
-                            # a. Đọc và lọc Vote
-                            raw_experts = process_expert_text_v2(expert_file, EXPERT_MIN_VOTE)
-                            # b. Lấy cấu hình điểm hiện tại (đã được tối ưu nếu bấm Quét)
-                            curr_std_cfg = {f'M{i}': st.session_state[f'std_{i}'] for i in range(11)}
-                            curr_mod_cfg = {f'M{i}': st.session_state[f'mod_{i}'] for i in range(11)}
-                            if target in data_cache:
-                                df_today = data_cache[target]['df']
-                                # c. Lọc theo điểm trọng số
-                                final_expert_nums = filter_expert_by_score(
-                                    raw_experts, curr_std_cfg, curr_mod_cfg, df_today, EXPERT_TARGET_SIZE
-                                )
 
                         st.session_state['run_result'] = {
                             'res_curr': res_curr, 'target': target, 'err': err_curr,
-                            'hc_goc': hc_goc, 'screen_goc': screen_goc, 'hybrid_goc': hybrid_goc,
-                            'dan_expert': final_expert_nums
+                            'hc_goc': hc_goc, 'screen_goc': screen_goc, 'hybrid_goc': hybrid_goc
                         }
 
                 if 'run_result' in st.session_state and st.session_state['run_result']['target'] == target:
@@ -859,23 +696,13 @@ def main():
                                 with c_m[i]: st.text_area(o['t'], ",".join(o['d']), height=100)
                         
                         st.divider()
-                        st.write("#### 🧬 Phân Tích Hybrid")
+                        st.write("#### 🧬 Phân Tích Hybrid (Hard Core + Màn Hình)")
+                        st.caption("Dàn Hybrid này là giao thoa giữa **Hard Core (Gốc)** và **Cấu hình bạn đang chỉnh**.")
+                        
                         c_h1, c_h2, c_h3 = st.columns(3)
                         with c_h1: st.text_area(f"Hard Core (Trụ) ({len(rr['hc_goc'])})", ",".join(rr['hc_goc']), height=100)
                         with c_h2: st.text_area(f"Màn Hình (Biến) ({len(rr['screen_goc'])})", ",".join(rr['screen_goc']), height=100)
                         with c_h3: st.text_area(f"⚔️ HYBRID ĐỘNG ({len(rr['hybrid_goc'])})", ",".join(rr['hybrid_goc']), height=100)
-
-                        if 'dan_expert' in rr and rr['dan_expert']:
-                            st.divider()
-                            st.write(f"#### 👤 Dàn Cao Thủ (Lọc bởi Điểm Màn Hình)")
-                            st.caption(f"Quy trình: File Text -> Lọc Min Vote ({EXPERT_MIN_VOTE}) -> Chấm điểm bằng Trọng số Màn hình -> Giữ lại {EXPERT_TARGET_SIZE} số điểm cao nhất.")
-                            c_ex1, c_ex2 = st.columns([3, 1])
-                            with c_ex1: st.text_area("KẾT QUẢ EXPERT:", ",".join(rr['dan_expert']), height=80)
-                            with c_ex2:
-                                if 'hybrid_goc' in rr:
-                                    super_hyb = sorted(list(set(rr['dan_expert']).intersection(set(rr['hybrid_goc']))))
-                                    st.metric("Số lượng", len(rr['dan_expert']))
-                                    st.info(f"💎 **SIÊU KẾT:** {len(super_hyb)} số")
 
                         if target in kq_db:
                             real = kq_db[target]
@@ -888,25 +715,23 @@ def main():
                             with c_r3:
                                 if real in rr['hybrid_goc']: st.success("Hybrid: WIN")
                                 else: st.error("Hybrid: MISS")
-                            if 'dan_expert' in rr and rr['dan_expert']:
-                                if real in rr['dan_expert']: st.success(f"Cao thủ ({len(rr['dan_expert'])}): WIN")
-                                else: st.error(f"Cao thủ ({len(rr['dan_expert'])}): MISS")
-
+# ===== DAY SIGNAL & WARNING (MODULE) =====
                             pa2.render_pa2_preanalysis(
                                 res_curr=res_curr,
                                 res_hc=res_hc,
                                 hybrid_goc=hybrid_goc,
-                            )
-
-            # --- TAB 2: BACKTEST (GIỮ NGUYÊN) ---
+)
+            # --- TAB 2: BACKTEST (SINGLE MODE) ---
             with tab2:
-                st.subheader("🔙 Backtest Chi Tiết")
+                st.subheader("🔙 Backtest Chi Tiết (Single Mode)")
+                
                 c_bt_1, c_bt_2 = st.columns([1, 2])
                 with c_bt_1:
                     cfg_options = ["Màn hình hiện tại"] + list(SCORES_PRESETS.keys()) + ["Gốc 3 (Test Input 75/Target 70)", "⚔️ Hybrid: HC(Gốc) + CH1(Gốc)"]
-                    selected_cfg = st.selectbox("Chọn Cấu Hình:", cfg_options)
+                    selected_cfg = st.selectbox("Chọn Cấu Hình Backtest:", cfg_options)
                     st.write("---")
-                    use_adaptive_bt = st.checkbox("🧠 Bật M Động", value=False)
+                    use_adaptive_bt = st.checkbox("🧠 Bật M Động (Adaptive)", value=False)
+                
                 with c_bt_2:
                     d_start = st.date_input("Từ ngày:", value=last_d - timedelta(days=10), key="bt_d1")
                     d_end = st.date_input("Đến ngày:", value=last_d, key="bt_d2")
@@ -917,7 +742,9 @@ def main():
                     else:
                         dates_range = [d_start + timedelta(days=i) for i in range((d_end - d_start).days + 1)]
                         logs = []; bar = st.progress(0)
+                        
                         def check_win(kq, arr): return "✅" if kq in arr else "❌"
+
                         for idx, d in enumerate(dates_range):
                             bar.progress((idx + 1) / len(dates_range))
                             if d not in kq_db: continue
@@ -949,9 +776,11 @@ def main():
                                     is_goc3 = True; run_s = {f'M{i}': st.session_state[f'std_{i}'] for i in range(11)}; inp = 75; tar = 70; run_r = ROLLING_WINDOW
                                 elif selected_cfg in SCORES_PRESETS:
                                     run_s, run_m, run_l, run_r = get_preset_params(selected_cfg)
+                                
                                 if use_adaptive_bt:
                                     run_s = get_adaptive_weights(d, run_s, data_cache, kq_db, 3, 1.5)
                                     if not is_goc3: run_m = get_adaptive_weights(d, run_m, data_cache, kq_db, 3, 1.5)
+                                
                                 if is_goc3:
                                     res = calculate_goc_3_logic(d, run_r, data_cache, kq_db, inp, tar, run_s, USE_INVERSE, MIN_VOTES)
                                     if res:
@@ -963,6 +792,7 @@ def main():
                                     if res:
                                         row.update({"Gốc": f"{check_win(real_kq, res['dan_goc'])} ({len(res['dan_goc'])})", "Mod": f"{check_win(real_kq, res['dan_mod'])} ({len(res['dan_mod'])})", "Final": f"{check_win(real_kq, res['dan_final'])} ({len(res['dan_final'])})"})
                                         logs.append(row)
+
                         bar.empty()
                         if logs:
                             df_log = pd.DataFrame(logs)
